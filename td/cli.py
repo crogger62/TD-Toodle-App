@@ -6,6 +6,7 @@ from typing import Iterable, List, Optional
 import requests
 
 from . import auth
+from . import __version__
 
 
 def _print_login_result(tokens: dict) -> None:
@@ -238,6 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    print(f"td {__version__}")
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

@@ -1,1 +1,3 @@
-# Toodledo CLI package.
+"""Toodledo CLI package."""
+
+__version__ = "0.90"
