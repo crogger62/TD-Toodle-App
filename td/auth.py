@@ -12,7 +12,7 @@ import requests
 
 
 AUTH_BASE = "https://api.toodledo.com/3/account"
-TASKS_SCOPE = "basic tasks"
+TASKS_SCOPE = "basic tasks write"
 DEFAULT_REDIRECT_PORT = 8765
 
 ENV_CLIENT_ID = "TOODLEDO_CLIENT_ID"

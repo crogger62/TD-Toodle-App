@@ -127,7 +127,7 @@ Scopes
 
 Request exactly:
 
-basic tasks
+basic tasks write
 
 (space-separated)
 
