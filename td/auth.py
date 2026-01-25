@@ -175,13 +175,17 @@ def _normalize_token_response(payload: dict) -> dict:
     expires_in = int(payload.get("expires_in") or 0)
     access_token = payload.get("access_token")
     refresh_token = payload.get("refresh_token")
+    scope = payload.get("scope")
     if not access_token or not refresh_token or not expires_in:
         raise RuntimeError("Token response missing required fields.")
-    return {
+    tokens = {
         "access_token": access_token,
         "refresh_token": refresh_token,
         "expires_at": int(time.time()) + expires_in,
     }
+    if scope:
+        tokens["scope"] = scope
+    return tokens
 
 
 def load_tokens_from_env() -> Optional[dict]:

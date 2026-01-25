@@ -136,6 +136,10 @@ def _apply_due_date(access_token: str, task_ids: List[int], new_date: str) -> Li
             data={"access_token": access_token, "tasks": json.dumps(batch)},
             timeout=30,
         )
+        if response.status_code == 401:
+            raise RuntimeError(
+                f"Unauthorized when updating tasks. Response: {response.text.strip()}"
+            )
         response.raise_for_status()
         payload = response.json()
         auth._raise_if_error(payload)
@@ -173,6 +177,11 @@ def cmd_bump_overdue(args: argparse.Namespace) -> int:
         target_date = _parse_target_date(args.date)
         today = date.today()
         tokens = auth.ensure_tokens()
+        scope = tokens.get("scope")
+        if scope and "write" not in scope.split():
+            raise RuntimeError(
+                f"Access token lacks write scope (scope='{scope}'). Re-run login."
+            )
         try:
             tasks = list(_fetch_tasks(tokens["access_token"], "duedate,duetime,repeat"))
         except Exception as exc:  # noqa: BLE001
