@@ -457,3 +457,11 @@ TOODLEDO_CLIENT_SECRET
 PowerShell helper script (local only):
 
 set-td-env.ps1
+
+Scheduler helper (no secrets):
+
+run-bump-overdue.ps1
+
+Daily run guide:
+
+docs/how-to-bump-daily.md
