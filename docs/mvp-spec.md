@@ -45,8 +45,6 @@ Async or concurrent networking
 
 Local task cache or sync state
 
-Persistent token storage
-
 Technology Choices
 Language
 
@@ -116,6 +114,10 @@ td list [filters] [--sort FIELD] [--desc] [--limit N] [--format table|json|csv]
 
 td bump-overdue [--date YYYY-MM-DD] [--apply]
 
+td logout
+
+td help
+
 Notes
 
 td whoami and td list will invoke the OAuth flow if no valid access token is available.
@@ -163,9 +165,35 @@ Token Handling
 
 Storage
 
-Tokens are not stored on disk.
+Tokens are stored on disk in a per-user app data directory and reused across commands.
 
-Tokens are held in memory only for the duration of the command.
+Environment variables, if set, take precedence over the token file.
+
+Logout
+
+td logout deletes the token file (if present).
+
+Token file location:
+
+Windows: %APPDATA%\toodledo-cli\tokens.json
+
+macOS: ~/Library/Application Support/toodledo-cli/tokens.json
+
+Linux/WSL: ${XDG_CONFIG_HOME:-~/.config}/toodledo-cli/tokens.json
+
+Token file format (JSON):
+
+access_token
+
+refresh_token
+
+expires_at (epoch seconds)
+
+scope (optional)
+
+File permissions:
+
+On Unix-like systems, set to 0600.
 
 If tokens are provided via environment variables, the CLI uses them without invoking OAuth.
 
@@ -203,7 +231,7 @@ Never fail due to missing identity fields
 
 Local Storage
 
-No on-disk storage is used in the MVP.
+Only the token file is stored locally; task data is never stored on disk.
 
 Tasks API
 

@@ -63,6 +63,27 @@ def cmd_whoami(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_logout(_args: argparse.Namespace) -> int:
+    try:
+        removed = auth.delete_token_file()
+    except Exception as exc:  # noqa: BLE001
+        print(f"logout failed: {exc}")
+        return 1
+    if removed:
+        print("Logged out. Token file removed.")
+    else:
+        print("No token file found.")
+    return 0
+
+
+def cmd_help(args: argparse.Namespace) -> int:
+    if args.parser:
+        args.parser.print_help()
+        return 0
+    print("No help available.")
+    return 0
+
+
 def _fetch_tasks(access_token: str, fields: str) -> Iterable[dict]:
     start = 0
     page_size = 1000
@@ -237,6 +258,9 @@ def build_parser() -> argparse.ArgumentParser:
     whoami_parser = subparsers.add_parser("whoami", help="Show authenticated user")
     whoami_parser.set_defaults(func=cmd_whoami)
 
+    logout_parser = subparsers.add_parser("logout", help="Remove stored tokens")
+    logout_parser.set_defaults(func=cmd_logout)
+
     bump_parser = subparsers.add_parser(
         "bump-overdue", help="Move overdue tasks to today or a specified date"
     )
@@ -253,6 +277,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--debug", action="store_true", help="Print debug info for one run"
     )
     bump_parser.set_defaults(func=cmd_bump_overdue)
+
+    help_parser = subparsers.add_parser("help", help="Show help")
+    help_parser.set_defaults(func=cmd_help, parser=parser)
 
     return parser
 

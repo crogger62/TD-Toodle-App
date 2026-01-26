@@ -7,6 +7,7 @@ import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional
+import sys
 
 import requests
 
@@ -188,6 +189,79 @@ def _normalize_token_response(payload: dict) -> dict:
     return tokens
 
 
+def _token_storage_dir() -> str:
+    if os.name == "nt":
+        base = os.getenv("APPDATA")
+        if not base:
+            base = os.path.expanduser("~\\AppData\\Roaming")
+    elif sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.getenv("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "toodledo-cli")
+
+
+def _token_storage_path() -> str:
+    return os.path.join(_token_storage_dir(), "tokens.json")
+
+
+def token_storage_path() -> str:
+    return _token_storage_path()
+
+
+def delete_token_file() -> bool:
+    path = _token_storage_path()
+    if not os.path.exists(path):
+        return False
+    os.remove(path)
+    return True
+
+
+def load_tokens_from_file() -> Optional[dict]:
+    path = _token_storage_path()
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    access_token = data.get("access_token")
+    refresh_token = data.get("refresh_token")
+    expires_at = data.get("expires_at")
+    scope = data.get("scope")
+    if not access_token or not refresh_token or not expires_at:
+        raise RuntimeError("Token file missing required fields.")
+    try:
+        expires_at_int = int(expires_at)
+    except ValueError as exc:
+        raise ValueError("Token file expires_at must be epoch seconds.") from exc
+    tokens = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_at": expires_at_int,
+    }
+    if scope:
+        tokens["scope"] = scope
+    return tokens
+
+
+def save_tokens_to_file(tokens: dict) -> None:
+    path = _token_storage_path()
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    temp_path = f"{path}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as handle:
+        json.dump(tokens, handle, indent=2, sort_keys=True)
+    os.replace(temp_path, path)
+    if os.name != "nt":
+        os.chmod(path, 0o600)
+
+
+def _try_save_tokens(tokens: dict) -> None:
+    try:
+        save_tokens_to_file(tokens)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: failed to save tokens to disk: {exc}")
+
+
 def load_tokens_from_env() -> Optional[dict]:
     access_token = os.getenv(ENV_ACCESS_TOKEN)
     refresh_token = os.getenv(ENV_REFRESH_TOKEN)
@@ -208,9 +282,12 @@ def load_tokens_from_env() -> Optional[dict]:
 def ensure_tokens() -> dict:
     tokens = load_tokens_from_env()
     if tokens is None:
+        tokens = load_tokens_from_file()
+    if tokens is None:
         client_id, client_secret = _require_client_credentials()
         payload = _run_oauth_flow(client_id, client_secret)
         tokens = _normalize_token_response(payload)
+        _try_save_tokens(tokens)
         return tokens
 
     if tokens["expires_at"] - time.time() <= 300:
@@ -219,6 +296,7 @@ def ensure_tokens() -> dict:
             client_id, client_secret, tokens["refresh_token"]
         )
         tokens = _normalize_token_response(payload)
+        _try_save_tokens(tokens)
     return tokens
 
 
@@ -227,7 +305,9 @@ def refresh_on_failure(tokens: dict, error: Exception) -> dict:
         raise error
     client_id, client_secret = _require_client_credentials()
     payload = _refresh_token(client_id, client_secret, tokens["refresh_token"])
-    return _normalize_token_response(payload)
+    tokens = _normalize_token_response(payload)
+    _try_save_tokens(tokens)
+    return tokens
 
 
 def format_env_exports(tokens: dict) -> str:
