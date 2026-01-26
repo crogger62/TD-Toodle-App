@@ -77,10 +77,17 @@ def cmd_logout(_args: argparse.Namespace) -> int:
 
 
 def cmd_help(args: argparse.Namespace) -> int:
-    if args.parser:
-        args.parser.print_help()
+    if args.parser is None:
+        print("No help available.")
         return 0
-    print("No help available.")
+    if args.command_name:
+        sub = args.subparsers.get(args.command_name)
+        if not sub:
+            print(f"Unknown command: {args.command_name}")
+            return 1
+        sub.print_help()
+        return 0
+    args.parser.print_help()
     return 0
 
 
@@ -279,7 +286,12 @@ def build_parser() -> argparse.ArgumentParser:
     bump_parser.set_defaults(func=cmd_bump_overdue)
 
     help_parser = subparsers.add_parser("help", help="Show help")
-    help_parser.set_defaults(func=cmd_help, parser=parser)
+    help_parser.add_argument("command_name", nargs="?", help="Command to show help for")
+    help_parser.set_defaults(
+        func=cmd_help,
+        parser=parser,
+        subparsers={name: p for name, p in subparsers.choices.items()},
+    )
 
     return parser
 
