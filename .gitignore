@@ -5,3 +5,5 @@ env/
 venv/
 .env
 .python-version
+
+set-td-env.ps1
