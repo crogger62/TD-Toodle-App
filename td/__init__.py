@@ -1,3 +1,3 @@
 """Toodledo CLI package."""
 
-__version__ = "0.90"
+__version__ = "0.93"

@@ -394,6 +394,12 @@ Apply changes only when --apply is provided.
 
 --date accepts YYYY-MM-DD and sets the target due date; default is today (local date).
 
+Optional testing flags:
+
+--limit N updates only the first N matching tasks.
+
+--debug prints the edit payload and response for troubleshooting.
+
 Only incomplete tasks are considered.
 
 Tasks without due dates are ignored.
@@ -410,6 +416,8 @@ Use /3/tasks/edit.php
 
 Send updates in batches (<= 50 tasks per request).
 
+Due date updates must send duedate as a GMT Unix timestamp at noon UTC.
+
 Client Credentials
 
 Client ID and Client Secret must be provided via environment variables:
@@ -417,3 +425,7 @@ Client ID and Client Secret must be provided via environment variables:
 TOODLEDO_CLIENT_ID
 
 TOODLEDO_CLIENT_SECRET
+
+PowerShell helper script (local only):
+
+set-td-env.ps1

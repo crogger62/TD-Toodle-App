@@ -1,6 +1,6 @@
 import argparse
 import json
-from datetime import date, datetime
+from datetime import date, datetime, time as dt_time, timezone
 from typing import Iterable, List, Optional
 
 import requests
@@ -128,10 +128,12 @@ def _collect_overdue_tasks(tasks: Iterable[dict], today: date) -> List[dict]:
     return overdue
 
 
-def _apply_due_date(access_token: str, task_ids: List[int], new_date: str) -> List[dict]:
+def _apply_due_date(access_token: str, task_ids: List[int], new_date: int, debug: bool) -> List[dict]:
     results = []
     for i in range(0, len(task_ids), 50):
         batch = [{"id": task_id, "duedate": new_date} for task_id in task_ids[i : i + 50]]
+        if debug and batch:
+            print(f"DEBUG: edit payload (first item): {batch[0]}")
         response = requests.post(
             "https://api.toodledo.com/3/tasks/edit.php",
             data={"access_token": access_token, "tasks": json.dumps(batch)},
@@ -143,17 +145,19 @@ def _apply_due_date(access_token: str, task_ids: List[int], new_date: str) -> Li
             )
         response.raise_for_status()
         payload = response.json()
+        if debug:
+            print(f"DEBUG: edit response: {payload}")
         auth._raise_if_error(payload)
         if isinstance(payload, list):
             results.extend(payload)
     return results
 
 
-def _print_overdue(tasks: List[dict], target_date: str) -> None:
+def _print_overdue(tasks: List[dict], target_date: date) -> None:
     if not tasks:
         print("No overdue tasks found.")
         return
-    target_date_fmt = datetime.strptime(target_date, "%Y-%m-%d").strftime("%m/%d/%Y")
+    target_date_fmt = target_date.strftime("%m/%d/%Y")
     print(f"Overdue tasks to move to {target_date_fmt}:")
     for task in tasks:
         due_value = task.get("duedate")
@@ -163,20 +167,27 @@ def _print_overdue(tasks: List[dict], target_date: str) -> None:
         print(f"{task.get('id')}\t{duedate} -> {target_date_fmt}\t{title}")
 
 
-def _parse_target_date(value: Optional[str]) -> str:
+def _parse_target_date(value: Optional[str]) -> date:
     if not value:
-        return date.today().isoformat()
+        return date.today()
     try:
-        datetime.strptime(value, "%Y-%m-%d")
+        return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError as exc:
         raise ValueError("Date must be in YYYY-MM-DD format.") from exc
-    return value
+
+
+def _date_to_due_epoch(value: date) -> int:
+    dt_value = datetime.combine(value, dt_time(12, 0), tzinfo=timezone.utc)
+    return int(dt_value.timestamp())
 
 
 def cmd_bump_overdue(args: argparse.Namespace) -> int:
     try:
         target_date = _parse_target_date(args.date)
         today = date.today()
+        target_epoch = _date_to_due_epoch(target_date)
+        if args.debug:
+            print(f"DEBUG: target date {target_date.isoformat()} -> epoch {target_epoch}")
         tokens = auth.ensure_tokens()
         scope = tokens.get("scope")
         if scope and "write" not in scope.split():
@@ -189,6 +200,8 @@ def cmd_bump_overdue(args: argparse.Namespace) -> int:
             tokens = auth.refresh_on_failure(tokens, exc)
             tasks = list(_fetch_tasks(tokens["access_token"], "duedate,duetime,repeat"))
         overdue = _collect_overdue_tasks(tasks, today)
+        if args.limit:
+            overdue = overdue[: args.limit]
         _print_overdue(overdue, target_date)
         if not overdue:
             return 0
@@ -197,10 +210,10 @@ def cmd_bump_overdue(args: argparse.Namespace) -> int:
             return 0
         task_ids = [task["id"] for task in overdue]
         try:
-            results = _apply_due_date(tokens["access_token"], task_ids, target_date)
+            results = _apply_due_date(tokens["access_token"], task_ids, target_epoch, args.debug)
         except Exception as exc:  # noqa: BLE001
             tokens = auth.refresh_on_failure(tokens, exc)
-            results = _apply_due_date(tokens["access_token"], task_ids, target_date)
+            results = _apply_due_date(tokens["access_token"], task_ids, target_epoch, args.debug)
         errors = [item for item in results if "errorCode" in item]
         if errors:
             print(f"Updated {len(task_ids) - len(errors)} tasks, {len(errors)} failed.")
@@ -232,6 +245,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     bump_parser.add_argument(
         "--apply", action="store_true", help="Apply updates (default is dry run)"
+    )
+    bump_parser.add_argument(
+        "--limit", type=int, help="Limit number of tasks updated (for testing)"
+    )
+    bump_parser.add_argument(
+        "--debug", action="store_true", help="Print debug info for one run"
     )
     bump_parser.set_defaults(func=cmd_bump_overdue)
 
