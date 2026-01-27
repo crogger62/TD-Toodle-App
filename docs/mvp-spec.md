@@ -1,4 +1,5 @@
 Toodledo CLI (Python) — MVP Specification
+Version 1.0 (2026-01-27)
 
 This document defines the complete, final MVP for a cross-platform Python CLI that authenticates with Toodledo, retrieves tasks live from the API, and supports client-side filtering and listing.
 

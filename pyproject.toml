@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "toodledo-cli"
-version = "0.96"
+version = "1.0"
 description = "Toodledo CLI (MVP)"
 requires-python = ">=3.9"
 dependencies = ["requests>=2.31"]

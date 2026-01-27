@@ -41,3 +41,4 @@ Notes
 - Tokens are stored locally in your user profile and are reused across runs.
 - If a token expires and refresh fails, re-run the one-time login step to refresh it.
 - The script uses set-td-env.ps1 for credentials; keep that file local only.
+- For testing, you can add `--limit N` to `bump-overdue` to update only the first N overdue tasks.
