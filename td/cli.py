@@ -1,18 +1,19 @@
 import argparse
 import json
-from datetime import date, datetime, time as dt_time, timezone
+import sys
+from datetime import date, datetime
 from typing import Iterable, List, Optional
 
 import requests
 
 from . import auth
 from . import __version__
+from . import tasks
 
 
 def _print_login_result(tokens: dict) -> None:
     print("Login successful.")
-    print("Set these environment variables to reuse tokens:")
-    print(auth.format_env_exports(tokens))
+    print(f"Tokens saved to: {auth.token_storage_path()}")
 
 
 def cmd_login(_args: argparse.Namespace) -> int:
@@ -91,52 +92,11 @@ def cmd_help(args: argparse.Namespace) -> int:
     return 0
 
 
-def _fetch_tasks(access_token: str, fields: str) -> Iterable[dict]:
-    start = 0
-    page_size = 1000
-    while True:
-        response = requests.get(
-            "https://api.toodledo.com/3/tasks/get.php",
-            params={
-                "access_token": access_token,
-                "comp": 0,
-                "fields": fields,
-                "start": start,
-                "num": page_size,
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        auth._raise_if_error(payload)
-        if not isinstance(payload, list) or not payload:
-            return
-        tasks = [item for item in payload if "id" in item]
-        if not tasks:
-            return
-        for task in tasks:
-            yield task
-        if len(tasks) < page_size:
-            return
-        start += page_size
-
-
 def _parse_task_date(value) -> Optional[date]:
-    if value is None or value == "" or value == 0 or value == "0":
-        return None
-    if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(int(value)).date()
-    if isinstance(value, str) and value.isdigit():
-        return datetime.fromtimestamp(int(value)).date()
-    if isinstance(value, str):
-        try:
-            return datetime.strptime(value, "%Y-%m-%d").date()
-        except ValueError as exc:
-            raise ValueError(f"Unsupported due date format: {value}") from exc
-    raise ValueError(f"Unsupported due date type: {type(value)}")
+    return tasks.parse_task_date(value)
 
 
-def _collect_overdue_tasks(tasks: Iterable[dict], today: date) -> List[dict]:
+def _collect_overdue_tasks(tasks: Iterable[dict], today: date, include_recurring: bool = False) -> List[dict]:
     overdue = []
     for task in tasks:
         completed = task.get("completed")
@@ -146,7 +106,7 @@ def _collect_overdue_tasks(tasks: Iterable[dict], today: date) -> List[dict]:
         if duetime and str(duetime) != "0":
             continue
         repeat = task.get("repeat")
-        if repeat and str(repeat) != "0":
+        if not include_recurring and repeat and str(repeat) != "0":
             continue
         duedate = _parse_task_date(task.get("duedate"))
         if not duedate:
@@ -154,31 +114,6 @@ def _collect_overdue_tasks(tasks: Iterable[dict], today: date) -> List[dict]:
         if duedate < today:
             overdue.append(task)
     return overdue
-
-
-def _apply_due_date(access_token: str, task_ids: List[int], new_date: int, debug: bool) -> List[dict]:
-    results = []
-    for i in range(0, len(task_ids), 50):
-        batch = [{"id": task_id, "duedate": new_date} for task_id in task_ids[i : i + 50]]
-        if debug and batch:
-            print(f"DEBUG: edit payload (first item): {batch[0]}")
-        response = requests.post(
-            "https://api.toodledo.com/3/tasks/edit.php",
-            data={"access_token": access_token, "tasks": json.dumps(batch)},
-            timeout=30,
-        )
-        if response.status_code == 401:
-            raise RuntimeError(
-                f"Unauthorized when updating tasks. Response: {response.text.strip()}"
-            )
-        response.raise_for_status()
-        payload = response.json()
-        if debug:
-            print(f"DEBUG: edit response: {payload}")
-        auth._raise_if_error(payload)
-        if isinstance(payload, list):
-            results.extend(payload)
-    return results
 
 
 def _print_overdue(tasks: List[dict], target_date: date) -> None:
@@ -205,8 +140,109 @@ def _parse_target_date(value: Optional[str]) -> date:
 
 
 def _date_to_due_epoch(value: date) -> int:
-    dt_value = datetime.combine(value, dt_time(12, 0), tzinfo=timezone.utc)
-    return int(dt_value.timestamp())
+    return tasks.date_to_due_epoch(value)
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    if isinstance(exc, requests.HTTPError):
+        return getattr(exc.response, "status_code", None) == 401
+    if isinstance(exc, RuntimeError):
+        return "Unauthorized" in str(exc)
+    return False
+
+
+def _load_add_payload(args: argparse.Namespace) -> dict:
+    if args.stdin_json:
+        raw = sys.stdin.read()
+    elif args.json_file:
+        with open(args.json_file, "r", encoding="utf-8") as handle:
+            raw = handle.read()
+    else:
+        raw = args.json
+    if raw is None or not raw.strip():
+        raise ValueError("No JSON input provided.")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON input: {exc.msg}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Input JSON must be an object.")
+    return payload
+
+
+def _print_json(payload: dict) -> None:
+    print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _create_task_with_lookup(access_token: str, normalized_input: dict) -> tuple[dict, Optional[dict]]:
+    folder_info = tasks.resolve_folder_value(access_token, normalized_input.get("folder"))
+    create_payload = tasks.build_add_task_payload(normalized_input, folder_info)
+    results = tasks.add_tasks(access_token, [create_payload])
+    if not results:
+        raise RuntimeError("Toodledo returned no task results.")
+    result = results[0]
+    if "errorCode" in result and result.get("errorCode"):
+        message = result.get("errorDesc") or result.get("error") or "Unknown task creation error."
+        raise RuntimeError(f"Toodledo API error {result.get('errorCode')}: {message}")
+    return result, folder_info
+
+
+def _format_add_success(
+    created_task: dict,
+    normalized_input: dict,
+    folder_info: Optional[dict],
+) -> dict:
+    task_payload = {
+        "id": created_task.get("id"),
+        "title": created_task.get("title", normalized_input["title"]),
+    }
+    if "due" in normalized_input:
+        task_payload["due"] = normalized_input["due"].isoformat()
+    if "priority" in normalized_input:
+        task_payload["priority"] = normalized_input["priority"]
+    if "star" in normalized_input:
+        task_payload["star"] = bool(normalized_input["star"])
+    if "tags" in normalized_input:
+        task_payload["tags"] = normalized_input["tags"].split(",")
+    if "note" in normalized_input:
+        task_payload["note"] = normalized_input["note"]
+    if folder_info is not None:
+        task_payload["folder"] = {
+            "input": folder_info["input"],
+            "resolved_id": folder_info["id"],
+            "resolved_name": folder_info.get("name"),
+            "match_type": folder_info["match_type"],
+        }
+
+    return {"ok": True, "task": task_payload}
+
+
+def cmd_add(args: argparse.Namespace) -> int:
+    try:
+        input_payload = _load_add_payload(args)
+        normalized_input = tasks.normalize_add_task_input(input_payload)
+        tokens = auth.ensure_tokens()
+        scope = tokens.get("scope")
+        if scope and "write" not in scope.split():
+            raise RuntimeError(
+                f"Access token lacks write scope (scope='{scope}'). Re-run login."
+            )
+        try:
+            created_task, folder_info = _create_task_with_lookup(
+                tokens["access_token"], normalized_input
+            )
+        except Exception as exc:  # noqa: BLE001
+            if not _is_auth_error(exc):
+                raise
+            tokens = auth.refresh_on_failure(tokens, exc)
+            created_task, folder_info = _create_task_with_lookup(
+                tokens["access_token"], normalized_input
+            )
+        _print_json(_format_add_success(created_task, normalized_input, folder_info))
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        _print_json({"ok": False, "error": str(exc)})
+        return 1
 
 
 def cmd_bump_overdue(args: argparse.Namespace) -> int:
@@ -223,11 +259,11 @@ def cmd_bump_overdue(args: argparse.Namespace) -> int:
                 f"Access token lacks write scope (scope='{scope}'). Re-run login."
             )
         try:
-            tasks = list(_fetch_tasks(tokens["access_token"], "duedate,duetime,repeat"))
+            tasks_payload = list(tasks.fetch_tasks(tokens["access_token"], "duedate,duetime,repeat"))
         except Exception as exc:  # noqa: BLE001
             tokens = auth.refresh_on_failure(tokens, exc)
-            tasks = list(_fetch_tasks(tokens["access_token"], "duedate,duetime,repeat"))
-        overdue = _collect_overdue_tasks(tasks, today)
+            tasks_payload = list(tasks.fetch_tasks(tokens["access_token"], "duedate,duetime,repeat"))
+        overdue = _collect_overdue_tasks(tasks_payload, today, args.include_recurring)
         if args.limit:
             overdue = overdue[: args.limit]
         _print_overdue(overdue, target_date)
@@ -238,10 +274,18 @@ def cmd_bump_overdue(args: argparse.Namespace) -> int:
             return 0
         task_ids = [task["id"] for task in overdue]
         try:
-            results = _apply_due_date(tokens["access_token"], task_ids, target_epoch, args.debug)
+            results = tasks.edit_tasks(
+                tokens["access_token"],
+                [{"id": task_id, "duedate": target_epoch} for task_id in task_ids],
+                args.debug,
+            )
         except Exception as exc:  # noqa: BLE001
             tokens = auth.refresh_on_failure(tokens, exc)
-            results = _apply_due_date(tokens["access_token"], task_ids, target_epoch, args.debug)
+            results = tasks.edit_tasks(
+                tokens["access_token"],
+                [{"id": task_id, "duedate": target_epoch} for task_id in task_ids],
+                args.debug,
+            )
         errors = [item for item in results if "errorCode" in item]
         if errors:
             print(f"Updated {len(task_ids) - len(errors)} tasks, {len(errors)} failed.")
@@ -268,6 +312,17 @@ def build_parser() -> argparse.ArgumentParser:
     logout_parser = subparsers.add_parser("logout", help="Remove stored tokens")
     logout_parser.set_defaults(func=cmd_logout)
 
+    add_parser = subparsers.add_parser("add", help="Create a new task from structured JSON")
+    add_input_group = add_parser.add_mutually_exclusive_group(required=True)
+    add_input_group.add_argument("--json", help="Inline JSON object describing the task")
+    add_input_group.add_argument("--json-file", help="Path to a JSON file describing the task")
+    add_input_group.add_argument(
+        "--stdin-json",
+        action="store_true",
+        help="Read a JSON object describing the task from stdin",
+    )
+    add_parser.set_defaults(func=cmd_add)
+
     bump_parser = subparsers.add_parser(
         "bump-overdue", help="Move overdue tasks to today or a specified date"
     )
@@ -283,6 +338,9 @@ def build_parser() -> argparse.ArgumentParser:
     bump_parser.add_argument(
         "--debug", action="store_true", help="Print debug info for one run"
     )
+    bump_parser.add_argument(
+        "--include-recurring", action="store_true", help="Include recurring tasks when bumping"
+    )
     bump_parser.set_defaults(func=cmd_bump_overdue)
 
     help_parser = subparsers.add_parser("help", help="Show help")
@@ -297,7 +355,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    print(f"td {__version__}")
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command != "add":
+        print(f"td {__version__}")
     return args.func(args)

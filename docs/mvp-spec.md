@@ -1,7 +1,7 @@
 Toodledo CLI (Python) — MVP Specification
-Version 1.0 (2026-01-27)
+Version 1.1 (2026-03-25)
 
-This document defines the complete, final MVP for a cross-platform Python CLI that authenticates with Toodledo, retrieves tasks live from the API, and supports client-side filtering and listing.
+This document defines the complete, final MVP for a cross-platform Python CLI that authenticates with Toodledo, retrieves tasks live from the API, supports client-side filtering and listing, and can create tasks from structured input.
 
 This document is authoritative.
 If implementation questions arise, follow this document.
@@ -13,6 +13,8 @@ The MVP SHALL:
 Authenticate a user via Toodledo OAuth2
 
 Retrieve tasks from Toodledo
+
+Create tasks in Toodledo from structured input
 
 Do not persist tasks locally
 
@@ -31,8 +33,6 @@ Windows (PowerShell and cmd.exe)
 Non-Goals (Explicit)
 
 The MVP SHALL NOT include:
-
-Creating or deleting tasks
 
 Notes, outlines, lists, or habits
 
@@ -111,6 +111,8 @@ td login
 
 td whoami
 
+td add (--json JSON | --json-file PATH | --stdin-json)
+
 td list [filters] [--sort FIELD] [--desc] [--limit N] [--format table|json|csv]
 
 td bump-overdue [--date YYYY-MM-DD] [--apply]
@@ -121,9 +123,11 @@ td help
 
 Notes
 
-td whoami and td list will invoke the OAuth flow if no valid access token is available.
+td whoami, td list, and td add will invoke the OAuth flow if no valid access token is available.
 
 td list fetches tasks live from the API and applies filters client-side in memory.
+
+td add accepts structured task input and returns structured JSON output.
 
 OAuth
 Scopes
@@ -168,7 +172,7 @@ Storage
 
 Tokens are stored on disk in a per-user app data directory and reused across commands.
 
-Environment variables, if set, take precedence over the token file.
+Tokens are loaded from the token file for normal operation.
 
 Logout
 
@@ -196,15 +200,7 @@ File permissions:
 
 On Unix-like systems, set to 0600.
 
-If tokens are provided via environment variables, the CLI uses them without invoking OAuth.
-
-Optional env vars:
-
-TOODLEDO_ACCESS_TOKEN
-
-TOODLEDO_REFRESH_TOKEN
-
-TOODLEDO_EXPIRES_AT (epoch seconds)
+Credentials are not read from environment variables in the MVP.
 
 Refresh Strategy
 
@@ -232,7 +228,7 @@ Never fail due to missing identity fields
 
 Local Storage
 
-Only the token file is stored locally; task data is never stored on disk.
+Only the config file and token file are stored locally; task data is never stored on disk.
 
 Tasks API
 
@@ -449,15 +445,11 @@ Due date updates must send duedate as a GMT Unix timestamp at noon UTC.
 
 Client Credentials
 
-Client ID and Client Secret must be provided via environment variables:
+Client ID and Client Secret must be provided in:
 
-TOODLEDO_CLIENT_ID
+%APPDATA%\toodledo-cli\config.json (Windows)
 
-TOODLEDO_CLIENT_SECRET
-
-PowerShell helper script (local only):
-
-set-td-env.ps1
+or the path set by TOODLEDO_CONFIG_PATH.
 
 Scheduler helper (no secrets):
 
@@ -466,3 +458,83 @@ run-bump-overdue.ps1
 Daily run guide:
 
 docs/how-to-bump-daily.md
+
+Add Task (td add)
+
+Purpose
+
+Create a new task in Toodledo from structured input. This command is intended to work well for both direct CLI use and LLM/tool-driven workflows.
+
+Input Modes
+
+Exactly one input mode is required:
+
+--json JSON
+
+--json-file PATH
+
+--stdin-json
+
+Input Fields
+
+Supported task fields:
+
+title (required)
+
+due (YYYY-MM-DD)
+
+priority (-1, 0, 1, 2, or 3)
+
+folder (folder name or numeric ID)
+
+tags (comma-separated string or array of strings)
+
+star (true/false or 0/1)
+
+note
+
+Folder Lookup
+
+If folder is numeric, treat it as a direct folder ID.
+
+If folder is a string, fetch folders and resolve by exact name first.
+
+A case-insensitive exact-name match MAY be used if no exact match exists.
+
+If no folder match exists, fail clearly.
+
+If multiple folder matches exist, fail clearly.
+
+Task Create Endpoint
+
+Use /3/tasks/add.php
+
+Folder Lookup Endpoint
+
+Use /3/folders/get.php
+
+Output
+
+td add returns JSON in both success and failure cases.
+
+Success responses SHALL include:
+
+ok = true
+
+task.id
+
+task.title
+
+Failure responses SHALL include:
+
+ok = false
+
+error
+
+Examples and setup:
+
+docs/add-task.md
+
+Configuration details:
+
+docs/configuration.md

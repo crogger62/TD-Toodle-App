@@ -1,0 +1,12 @@
+{
+  "title": "Buy batteries",
+  "due": "2026-03-28",
+  "priority": 2,
+  "folder": "Personal",
+  "tags": [
+    "claw",
+    "computer"
+  ],
+  "star": true,
+  "note": "AA batteries for thermostat"
+}

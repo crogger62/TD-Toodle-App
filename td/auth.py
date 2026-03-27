@@ -16,12 +16,8 @@ AUTH_BASE = "https://api.toodledo.com/3/account"
 TASKS_SCOPE = "basic tasks write"
 DEFAULT_REDIRECT_PORT = 8765
 
-ENV_CLIENT_ID = "TOODLEDO_CLIENT_ID"
-ENV_CLIENT_SECRET = "TOODLEDO_CLIENT_SECRET"
-ENV_ACCESS_TOKEN = "TOODLEDO_ACCESS_TOKEN"
-ENV_REFRESH_TOKEN = "TOODLEDO_REFRESH_TOKEN"
-ENV_EXPIRES_AT = "TOODLEDO_EXPIRES_AT"
 ENV_REDIRECT_PORT = "TOODLEDO_REDIRECT_PORT"
+ENV_CONFIG_PATH = "TOODLEDO_CONFIG_PATH"
 
 
 class OAuthResult:
@@ -54,6 +50,10 @@ class OAuthHandler(BaseHTTPRequestHandler):
 
 def _get_redirect_port() -> int:
     value = os.getenv(ENV_REDIRECT_PORT)
+    if not value:
+        config = load_config()
+        if config:
+            value = config.get("redirect_port")
     if value:
         try:
             port = int(value)
@@ -70,13 +70,18 @@ def _build_redirect_uri(port: int) -> str:
 
 
 def _require_client_credentials() -> tuple[str, str]:
-    client_id = os.getenv(ENV_CLIENT_ID)
-    client_secret = os.getenv(ENV_CLIENT_SECRET)
-    if not client_id or not client_secret:
-        raise RuntimeError(
-            f"Missing client credentials. Set {ENV_CLIENT_ID} and {ENV_CLIENT_SECRET}."
-        )
-    return client_id, client_secret
+    config = load_config()
+    if config:
+        client_id = config.get("client_id")
+        client_secret = config.get("client_secret")
+        if client_id and client_secret:
+            return client_id, client_secret
+
+    config_path = config_storage_path()
+    raise RuntimeError(
+        "Missing client credentials. Add client_id and client_secret to "
+        f"{config_path}."
+    )
 
 
 def _authorize_url(client_id: str, redirect_uri: str, state: str) -> str:
@@ -205,8 +210,19 @@ def _token_storage_path() -> str:
     return os.path.join(_token_storage_dir(), "tokens.json")
 
 
+def _config_storage_path() -> str:
+    override = os.getenv(ENV_CONFIG_PATH)
+    if override:
+        return os.path.expanduser(override)
+    return os.path.join(_token_storage_dir(), "config.json")
+
+
 def token_storage_path() -> str:
     return _token_storage_path()
+
+
+def config_storage_path() -> str:
+    return _config_storage_path()
 
 
 def delete_token_file() -> bool:
@@ -262,27 +278,19 @@ def _try_save_tokens(tokens: dict) -> None:
         print(f"Warning: failed to save tokens to disk: {exc}")
 
 
-def load_tokens_from_env() -> Optional[dict]:
-    access_token = os.getenv(ENV_ACCESS_TOKEN)
-    refresh_token = os.getenv(ENV_REFRESH_TOKEN)
-    expires_at = os.getenv(ENV_EXPIRES_AT)
-    if not access_token or not refresh_token or not expires_at:
+def load_config() -> Optional[dict]:
+    path = _config_storage_path()
+    if not os.path.exists(path):
         return None
-    try:
-        expires_at_int = int(expires_at)
-    except ValueError as exc:
-        raise ValueError(f"{ENV_EXPIRES_AT} must be epoch seconds.") from exc
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "expires_at": expires_at_int,
-    }
+    with open(path, "r", encoding="utf-8-sig") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError("Config file must be a JSON object.")
+    return data
 
 
 def ensure_tokens() -> dict:
-    tokens = load_tokens_from_env()
-    if tokens is None:
-        tokens = load_tokens_from_file()
+    tokens = load_tokens_from_file()
     if tokens is None:
         client_id, client_secret = _require_client_credentials()
         payload = _run_oauth_flow(client_id, client_secret)
@@ -308,15 +316,3 @@ def refresh_on_failure(tokens: dict, error: Exception) -> dict:
     tokens = _normalize_token_response(payload)
     _try_save_tokens(tokens)
     return tokens
-
-
-def format_env_exports(tokens: dict) -> str:
-    return json.dumps(
-        {
-            ENV_ACCESS_TOKEN: tokens["access_token"],
-            ENV_REFRESH_TOKEN: tokens["refresh_token"],
-            ENV_EXPIRES_AT: tokens["expires_at"],
-        },
-        indent=2,
-        sort_keys=True,
-    )
