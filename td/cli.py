@@ -9,6 +9,7 @@ import requests
 from . import auth
 from . import __version__
 from . import tasks
+from .list_cmd import cmd_list
 
 
 def _print_login_result(tokens: dict) -> None:
@@ -322,6 +323,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Read a JSON object describing the task from stdin",
     )
     add_parser.set_defaults(func=cmd_add)
+
+    list_parser = subparsers.add_parser("list", help="List incomplete tasks with optional filters")
+    list_parser.add_argument("--due-today", action="store_true", help="Only tasks due today")
+    list_parser.add_argument("--due-this-week", action="store_true", help="Tasks due in the next 7 days")
+    list_parser.add_argument("--priority", type=int, choices=[-1, 0, 1, 2, 3], help="Filter by priority")
+    list_parser.add_argument("--folder", help="Filter by folder name")
+    list_parser.add_argument("--limit", type=int, default=50, help="Max results to return (default: 50)")
+    list_parser.add_argument("--no-limit", action="store_true", help="Return all matching tasks (ignores --limit)")
+    list_parser.add_argument("--format", choices=["text", "json"], default="text", help="Output format (default: text)")
+    list_parser.add_argument("--folders", action="store_true", help="List available folders and exit")
+    list_parser.set_defaults(func=cmd_list)
 
     bump_parser = subparsers.add_parser(
         "bump-overdue", help="Move overdue tasks to today or a specified date"
