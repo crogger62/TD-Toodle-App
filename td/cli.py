@@ -329,6 +329,7 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--due-this-week", action="store_true", help="Tasks due in the next 7 days")
     list_parser.add_argument("--priority", type=int, choices=[-1, 0, 1, 2, 3], help="Filter by priority")
     list_parser.add_argument("--folder", help="Filter by folder name")
+    list_parser.add_argument("--tag", help="Filter by tag (exact match, case-insensitive)")
     list_parser.add_argument("--limit", type=int, default=50, help="Max results to return (default: 50)")
     list_parser.add_argument("--no-limit", action="store_true", help="Return all matching tasks (ignores --limit)")
     list_parser.add_argument("--format", choices=["text", "json"], default="text", help="Output format (default: text)")

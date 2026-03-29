@@ -101,7 +101,11 @@ python3 -m td list --priority 2
 # Filter by folder
 python3 -m td list --folder Personal
 
+# Filter by tag
+python3 -m td list --tag "data science"
+
 # Combine filters
+python3 -m td list --due-today --tag "data science"
 python3 -m td list --due-this-week --priority 1
 
 # Limit results
@@ -128,6 +132,7 @@ python3 -m td list --folders
 | `--due-this-week` | Tasks due within the next 7 days |
 | `--priority N` | Filter by priority (-1, 0, 1, 2, 3) |
 | `--folder NAME` | Filter by folder name |
+| `--tag TAG` | Filter by tag (exact match, case-insensitive) |
 | `--limit N` | Return first N results (default: 50) |
 | `--no-limit` | Return all matching tasks (ignores `--limit`) |
 | `--format text\|json` | Output format (default: text) |

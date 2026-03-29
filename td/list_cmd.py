@@ -37,15 +37,21 @@ def _apply_filters(
     due_this_week: bool,
     priority: Optional[int],
     folder_id: Optional[int],
+    tag: Optional[str] = None,
 ) -> Iterator[dict]:
     today = date.today()
     week_end = today + timedelta(days=7)
+    tag_lower = tag.lower() if tag else None
 
     for task in task_iter:
         if priority is not None and task.get("priority") != priority:
             continue
         if folder_id is not None and task.get("folder") != folder_id:
             continue
+        if tag_lower is not None:
+            task_tags = [t.strip().lower() for t in (task.get("tag") or "").split(",")]
+            if tag_lower not in task_tags:
+                continue
         if due_today or due_this_week:
             d = _parse_date(task.get("duedate"))
             if not d:
@@ -115,6 +121,7 @@ def cmd_list(args) -> int:
             due_this_week=args.due_this_week,
             priority=priority,
             folder_id=folder_id,
+            tag=args.tag,
         )
 
         # Collect up to limit (or all if --no-limit)
