@@ -1,5 +1,5 @@
 Toodledo CLI (Python) — MVP Specification
-Version 1.1 (2026-03-25)
+Version 1.2 (2026-03-28)
 
 This document defines the complete, final MVP for a cross-platform Python CLI that authenticates with Toodledo, retrieves tasks live from the API, supports client-side filtering and listing, and can create tasks from structured input.
 
@@ -113,7 +113,7 @@ td whoami
 
 td add (--json JSON | --json-file PATH | --stdin-json)
 
-td list [filters] [--sort FIELD] [--desc] [--limit N] [--format table|json|csv]
+td list [filters] [--limit N] [--no-limit] [--format text|json]
 
 td bump-overdue [--date YYYY-MM-DD] [--apply]
 
@@ -339,17 +339,25 @@ id ascending
 
 Filters (td list)
 
-Supported filters (MVP):
+Implemented filters:
+
+--due-today (tasks due today)
+
+--due-this-week (tasks due within 7 days)
+
+--folder NAME (case-insensitive exact name match)
+
+--tag TAG (case-insensitive exact tag match, comma-separated tag lists supported)
+
+--priority INT (exact match: -1, 0, 1, 2, 3)
+
+--folders (list available folders and exit)
+
+Not yet implemented (future):
 
 --completed yes|no
 
---folder ID_OR_NAME
-
 --context ID_OR_NAME
-
---tag TAG
-
---priority INT (exact match only)
 
 --starred yes|no
 
@@ -361,15 +369,17 @@ Supported filters (MVP):
 
 --search SUBSTRING
 
+--sort FIELD / --desc
+
 Priority Filters
 
 Exact integer only
 
-No ranges in MVP
+No ranges
 
 Rate Limits
 
-No retry or backoff logic in MVP
+No retry or backoff logic
 
 On rate limit or API exhaustion:
 
@@ -381,11 +391,15 @@ Do not continue pagination
 
 Output Formats
 
-table (default)
+text (default)
 
 json
 
-csv
+Limit Behavior
+
+--limit N: return first N results after filtering (default: 50)
+
+--no-limit: fetch all pages, return everything (ignores --limit)
 
 Portability Rules
 
