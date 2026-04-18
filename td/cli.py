@@ -246,6 +246,82 @@ def cmd_add(args: argparse.Namespace) -> int:
         return 1
 
 
+def _next_monday(today: date) -> date:
+    days_ahead = 7 - today.weekday()  # weekday(): Mon=0 ... Sun=6
+    if days_ahead == 7:
+        days_ahead = 7  # today IS Monday — go to next Monday
+    return today + __import__("datetime").timedelta(days=days_ahead)
+
+
+def cmd_linear_update(args: argparse.Namespace) -> int:
+    try:
+        tokens = auth.ensure_tokens()
+        scope = tokens.get("scope")
+        if scope and "write" not in scope.split():
+            raise RuntimeError(
+                f"Access token lacks write scope (scope='{scope}'). Re-run login."
+            )
+
+        # Resolve "Linear" folder ID
+        try:
+            folder_info = tasks.resolve_folder_value(tokens["access_token"], "Linear")
+        except Exception as exc:  # noqa: BLE001
+            if not _is_auth_error(exc):
+                raise
+            tokens = auth.refresh_on_failure(tokens, exc)
+            folder_info = tasks.resolve_folder_value(tokens["access_token"], "Linear")
+
+        folder_id = folder_info["id"]
+        target_date = _next_monday(date.today())
+        target_epoch = _date_to_due_epoch(target_date)
+        target_fmt = target_date.strftime("%m/%d/%Y")
+
+        try:
+            all_tasks = list(tasks.fetch_tasks(tokens["access_token"], "folder,duedate"))
+        except Exception as exc:  # noqa: BLE001
+            tokens = auth.refresh_on_failure(tokens, exc)
+            all_tasks = list(tasks.fetch_tasks(tokens["access_token"], "folder,duedate"))
+
+        linear_tasks = [
+            t for t in all_tasks
+            if t.get("folder") == folder_id
+            and (due := tasks.parse_task_date(t.get("duedate"))) is not None
+            and due < target_date
+        ]
+
+        if not linear_tasks:
+            print(f"No incomplete tasks found in the Linear folder.")
+            return 0
+
+        print(f"Updating {len(linear_tasks)} task(s) to due date {target_fmt}:")
+        for task in linear_tasks:
+            print(f"  {task['id']}\t{task.get('title', '')}")
+
+        if not args.apply:
+            print("Dry run only. Re-run with --apply to update these tasks.")
+            return 0
+
+        updates = [{"id": t["id"], "duedate": target_epoch} for t in linear_tasks]
+        try:
+            results = tasks.edit_tasks(tokens["access_token"], updates)
+        except Exception as exc:  # noqa: BLE001
+            tokens = auth.refresh_on_failure(tokens, exc)
+            results = tasks.edit_tasks(tokens["access_token"], updates)
+
+        errors = [item for item in results if item.get("errorCode")]
+        if errors:
+            print(f"Updated {len(linear_tasks) - len(errors)} tasks, {len(errors)} failed.")
+            for err in errors:
+                print(f"  Error {err.get('errorCode')}: {err.get('errorDesc')}")
+            return 1
+
+        print(f"Updated {len(linear_tasks)} tasks.")
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        print(f"linear-update failed: {exc}")
+        return 1
+
+
 def cmd_bump_overdue(args: argparse.Namespace) -> int:
     try:
         target_date = _parse_target_date(args.date)
@@ -355,6 +431,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-recurring", action="store_true", help="Include recurring tasks when bumping"
     )
     bump_parser.set_defaults(func=cmd_bump_overdue)
+
+    linear_parser = subparsers.add_parser(
+        "linear-update",
+        help="Set due date of all Linear folder tasks to next Monday",
+    )
+    linear_parser.add_argument(
+        "--apply", action="store_true", help="Apply updates (default is dry run)"
+    )
+    linear_parser.set_defaults(func=cmd_linear_update)
 
     help_parser = subparsers.add_parser("help", help="Show help")
     help_parser.add_argument("command_name", nargs="?", help="Command to show help for")

@@ -13,7 +13,13 @@ pip install -r requirements.txt
 ## Setup
 
 1. Create a Toodledo app at [api.toodledo.com](https://api.toodledo.com/3/account/doc_register.php) to get your `client_id` and `client_secret`.
-2. Save credentials to `~/Library/Application Support/toodledo-cli/config.json`:
+2. Save credentials to the platform config path:
+
+| Platform | Path |
+|----------|------|
+| Windows | `%APPDATA%\toodledo-cli\config.json` |
+| macOS | `~/Library/Application Support/toodledo-cli/config.json` |
+| Linux | `~/.config/toodledo-cli/config.json` |
 
 ```json
 {
@@ -28,7 +34,7 @@ pip install -r requirements.txt
 python3 -m td login
 ```
 
-This opens an OAuth flow and saves tokens to `~/Library/Application Support/toodledo-cli/tokens.json`.
+This opens an OAuth flow and saves tokens to the same directory as `tokens.json`.
 
 ---
 
@@ -140,6 +146,25 @@ python3 -m td list --folders
 
 ---
 
+### `linear-update`
+Set the due date of all incomplete tasks in the **Linear** folder to the next Monday, but only if their current due date is before that Monday.
+
+```bash
+# Dry run (shows what would be updated)
+python3 -m td linear-update
+
+# Apply changes
+python3 -m td linear-update --apply
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--apply` | Apply updates (default is dry run) |
+
+---
+
 ### `bump-overdue`
 Move overdue tasks to today (or a specified date).
 
@@ -162,12 +187,13 @@ python3 -m td bump-overdue --limit 5 --apply
 
 ---
 
-## Token Storage (macOS)
+## Token Storage
 
-| File | Purpose |
-|------|---------|
-| `~/Library/Application Support/toodledo-cli/config.json` | Client credentials |
-| `~/Library/Application Support/toodledo-cli/tokens.json` | OAuth tokens (auto-refreshed) |
+| Platform | config.json | tokens.json |
+|----------|-------------|-------------|
+| Windows | `%APPDATA%\toodledo-cli\config.json` | `%APPDATA%\toodledo-cli\tokens.json` |
+| macOS | `~/Library/Application Support/toodledo-cli/config.json` | `~/Library/Application Support/toodledo-cli/tokens.json` |
+| Linux | `~/.config/toodledo-cli/config.json` | `~/.config/toodledo-cli/tokens.json` |
 
 ---
 
