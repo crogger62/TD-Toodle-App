@@ -21,6 +21,10 @@ pip install -r requirements.txt
 | macOS | `~/Library/Application Support/toodledo-cli/config.json` |
 | Linux | `~/.config/toodledo-cli/config.json` |
 
+On Windows, this resolves to:
+
+- `C:\Users\<your-username>\AppData\Roaming\toodledo-cli\config.json`
+
 ```json
 {
   "client_id": "YOUR_CLIENT_ID",
@@ -35,6 +39,10 @@ python3 -m td login
 ```
 
 This opens an OAuth flow and saves tokens to the same directory as `tokens.json`.
+
+On Windows, tokens are saved at:
+
+- `C:\Users\<your-username>\AppData\Roaming\toodledo-cli\tokens.json`
 
 ---
 
@@ -61,7 +69,7 @@ python3 -m td logout
 ---
 
 ### `add`
-Create a new task from JSON.
+Create one or more tasks from JSON or CSV.
 
 ```bash
 # Inline JSON
@@ -72,6 +80,15 @@ python3 -m td add --json-file task.json
 
 # From stdin
 echo '{"title": "Buy milk"}' | python3 -m td add --stdin-json
+
+# Headerless CSV: title,tag
+python3 -m td add --csv-file movies.csv
+
+# Headerless CSV from stdin
+Get-Content movies.csv | python3 -m td add --stdin-csv
+
+# Custom CSV mapping
+python3 -m td add --csv-file tasks.csv --csv-columns title,folder,tags
 ```
 
 **JSON fields:**
@@ -85,6 +102,15 @@ echo '{"title": "Buy milk"}' | python3 -m td add --stdin-json
 | `tags` | string | `"claw"` | Comma-separated tags |
 | `star` | bool | `false` | Star the task |
 | `note` | string | `""` | Task note |
+
+**CSV input:**
+
+- CSV input is headerless by default
+- default column mapping is `title,tag`
+- use `--csv-columns` to override the mapping
+- supported CSV columns are `title`, `due`, `priority`, `folder`, `tags`, `tag`, `star`, and `note`
+- `title` is required in the column mapping
+- fields containing commas must be quoted, for example `"Paris, Texas",unknown`
 
 ---
 
@@ -195,6 +221,11 @@ python3 -m td bump-overdue --limit 5 --apply
 | macOS | `~/Library/Application Support/toodledo-cli/config.json` | `~/Library/Application Support/toodledo-cli/tokens.json` |
 | Linux | `~/.config/toodledo-cli/config.json` | `~/.config/toodledo-cli/tokens.json` |
 
+Windows concrete example:
+
+- `C:\Users\<your-username>\AppData\Roaming\toodledo-cli\config.json`
+- `C:\Users\<your-username>\AppData\Roaming\toodledo-cli\tokens.json`
+
 ---
 
 ## Project Structure
@@ -207,5 +238,22 @@ td/
   cli.py            # argparse subcommands
   list_cmd.py       # 'list' command implementation
   tasks.py          # Toodledo API calls (add, edit, fetch, folders)
+tdmedia/            # Local WatchList media catalog and queries
 docs/               # Additional documentation
 ```
+
+## WatchList Media Catalog
+
+`tdmedia` imports video media tasks from the Toodledo `WatchList` folder into a
+local SQLite catalog so they can be queried outside Toodledo.
+
+```bash
+python3 -m tdmedia sync
+python3 -m tdmedia services
+python3 -m tdmedia list --service Netflix
+python3 -m tdmedia search "spy"
+```
+
+The catalog stores the Toodledo title, tag-derived streaming service, notes, and
+task ID. See `docs/watchlist-implementation-plan.md` for the implementation
+plan and next milestones.
