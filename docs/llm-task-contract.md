@@ -44,6 +44,73 @@ This document defines the stable interface contract for LLM/agent use of the Too
 { "ok": false, "error": "Unknown folder: Inbox" }
 ```
 
+## Creating Tasks from CSV
+
+**Commands:**
+
+- `python3 -m td add --csv-file movies.csv`
+- `python3 -m td add --stdin-csv`
+
+**Input:** headerless CSV
+
+**Default CSV mapping:**
+
+- column 1: `title`
+- column 2: `tag`
+
+**Supported CSV columns:**
+
+- `title`
+- `due`
+- `priority`
+- `folder`
+- `tags`
+- `tag`
+- `star`
+- `note`
+
+**CSV rules:**
+
+- the mapping defaults to `title,tag`
+- use `--csv-columns` to override the mapping
+- the mapping must include `title`
+- `tags` and `tag` cannot both appear in one mapping
+- blank cells are omitted
+- each non-empty row creates one task
+- fields containing commas must be quoted
+
+Example:
+
+```csv
+8½,criterion
+"Paris, Texas",unknown
+```
+
+**Batch success response:**
+
+```json
+{
+  "ok": true,
+  "count": 2,
+  "tasks": [
+    {
+      "id": 123456789,
+      "title": "8½",
+      "due": "2026-03-28",
+      "priority": 0,
+      "tags": ["criterion"]
+    },
+    {
+      "id": 123456790,
+      "title": "Paris, Texas",
+      "due": "2026-03-28",
+      "priority": 0,
+      "tags": ["unknown"]
+    }
+  ]
+}
+```
+
 ## Listing Tasks
 
 **Command:** `python3 -m td list [options]`
@@ -70,6 +137,8 @@ This document defines the stable interface contract for LLM/agent use of the Too
 
 - `td add` always exits 0 on success, 1 on failure
 - `td add` always returns valid JSON to stdout
+- `td add` returns `{"ok": true, "task": ...}` for one created task
+- `td add` returns `{"ok": true, "tasks": [...], "count": N}` for multi-row CSV input
 - `td list` exits 0 on success, 1 on failure
 - `td list --format json` always returns a valid JSON array to stdout
 - Folder names must be exact (run `--folders` to discover them)

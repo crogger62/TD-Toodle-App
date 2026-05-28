@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 import sys
 from datetime import date, datetime
@@ -171,6 +172,77 @@ def _load_add_payload(args: argparse.Namespace) -> dict:
     return payload
 
 
+def _parse_csv_column_names(raw_value: Optional[str]) -> List[str]:
+    raw = (raw_value or "title,tag").strip()
+    if not raw:
+        raise ValueError("CSV columns cannot be blank.")
+
+    allowed = {"title", "due", "priority", "folder", "tags", "tag", "star", "note"}
+    columns = []
+    seen = set()
+    for item in raw.split(","):
+        name = item.strip()
+        if not name:
+            raise ValueError("CSV columns must not contain blank names.")
+        if name not in allowed:
+            raise ValueError(
+                f"Unsupported CSV column: {name}. "
+                f"Allowed columns: {', '.join(sorted(allowed))}."
+            )
+        if name in seen:
+            raise ValueError(f"Duplicate CSV column: {name}")
+        seen.add(name)
+        columns.append(name)
+
+    if "title" not in seen:
+        raise ValueError("CSV columns must include 'title'.")
+    if "tags" in seen and "tag" in seen:
+        raise ValueError("CSV columns cannot include both 'tags' and 'tag'.")
+    return columns
+
+
+def _load_add_csv_rows(args: argparse.Namespace) -> List[dict]:
+    if args.stdin_csv:
+        raw = sys.stdin.read()
+    elif args.csv_file:
+        with open(args.csv_file, "r", encoding="utf-8-sig", newline="") as handle:
+            raw = handle.read()
+    else:
+        raise ValueError("No CSV input provided.")
+
+    if raw is None or not raw.strip():
+        raise ValueError("No CSV input provided.")
+
+    column_names = _parse_csv_column_names(args.csv_columns)
+    reader = csv.reader(raw.splitlines())
+    rows = []
+    for line_number, row in enumerate(reader, start=1):
+        if not row or not any(cell.strip() for cell in row):
+            continue
+        if len(row) > len(column_names):
+            raise ValueError(
+                f"CSV row {line_number} has {len(row)} values but only "
+                f"{len(column_names)} column mappings were provided."
+            )
+
+        payload = {}
+        for index, column_name in enumerate(column_names):
+            if index >= len(row):
+                continue
+            value = row[index].strip()
+            if value == "":
+                continue
+            payload[column_name] = value
+
+        if not payload:
+            continue
+        rows.append(payload)
+
+    if not rows:
+        raise ValueError("CSV input did not contain any task rows.")
+    return rows
+
+
 def _print_json(payload: dict) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
@@ -218,10 +290,18 @@ def _format_add_success(
     return {"ok": True, "task": task_payload}
 
 
+def _create_single_task(access_token: str, raw_payload: dict) -> dict:
+    normalized_input = tasks.normalize_add_task_input(raw_payload)
+    created_task, folder_info = _create_task_with_lookup(access_token, normalized_input)
+    return _format_add_success(created_task, normalized_input, folder_info)["task"]
+
+
 def cmd_add(args: argparse.Namespace) -> int:
     try:
-        input_payload = _load_add_payload(args)
-        normalized_input = tasks.normalize_add_task_input(input_payload)
+        if args.csv_file or args.stdin_csv:
+            input_payloads = _load_add_csv_rows(args)
+        else:
+            input_payloads = [_load_add_payload(args)]
         tokens = auth.ensure_tokens()
         scope = tokens.get("scope")
         if scope and "write" not in scope.split():
@@ -229,17 +309,22 @@ def cmd_add(args: argparse.Namespace) -> int:
                 f"Access token lacks write scope (scope='{scope}'). Re-run login."
             )
         try:
-            created_task, folder_info = _create_task_with_lookup(
-                tokens["access_token"], normalized_input
-            )
+            created_tasks = [
+                _create_single_task(tokens["access_token"], payload)
+                for payload in input_payloads
+            ]
         except Exception as exc:  # noqa: BLE001
             if not _is_auth_error(exc):
                 raise
             tokens = auth.refresh_on_failure(tokens, exc)
-            created_task, folder_info = _create_task_with_lookup(
-                tokens["access_token"], normalized_input
-            )
-        _print_json(_format_add_success(created_task, normalized_input, folder_info))
+            created_tasks = [
+                _create_single_task(tokens["access_token"], payload)
+                for payload in input_payloads
+            ]
+        if len(created_tasks) == 1:
+            _print_json({"ok": True, "task": created_tasks[0]})
+        else:
+            _print_json({"ok": True, "tasks": created_tasks, "count": len(created_tasks)})
         return 0
     except Exception as exc:  # noqa: BLE001
         _print_json({"ok": False, "error": str(exc)})
@@ -393,10 +478,21 @@ def build_parser() -> argparse.ArgumentParser:
     add_input_group = add_parser.add_mutually_exclusive_group(required=True)
     add_input_group.add_argument("--json", help="Inline JSON object describing the task")
     add_input_group.add_argument("--json-file", help="Path to a JSON file describing the task")
+    add_input_group.add_argument("--csv-file", help="Path to a CSV file describing one or more tasks")
     add_input_group.add_argument(
         "--stdin-json",
         action="store_true",
         help="Read a JSON object describing the task from stdin",
+    )
+    add_input_group.add_argument(
+        "--stdin-csv",
+        action="store_true",
+        help="Read CSV rows describing one or more tasks from stdin",
+    )
+    add_parser.add_argument(
+        "--csv-columns",
+        default="title,tag",
+        help="Comma-separated CSV column mapping for headerless CSV input (default: title,tag)",
     )
     add_parser.set_defaults(func=cmd_add)
 

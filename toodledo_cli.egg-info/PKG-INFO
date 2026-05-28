@@ -1,3 +1,15 @@
+Metadata-Version: 2.4
+Name: toodledo-cli
+Version: 1.0
+Summary: Toodledo CLI (MVP)
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: requests>=2.31
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Dynamic: license-file
+
 # ToodleAPI — Toodledo CLI
 
 A command-line interface for interacting with [Toodledo](https://www.toodledo.com) via their REST API.

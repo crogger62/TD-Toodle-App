@@ -2,6 +2,7 @@ import unittest
 from datetime import date
 from tempfile import NamedTemporaryFile
 from unittest.mock import patch
+import os
 
 from td import cli
 from td import tasks
@@ -123,21 +124,72 @@ class BuildAddTaskPayloadTests(unittest.TestCase):
 
 class LoadAddPayloadTests(unittest.TestCase):
     def test_loads_payload_from_json_file(self) -> None:
-        with NamedTemporaryFile("w+", encoding="utf-8") as handle:
+        with NamedTemporaryFile("w+", encoding="utf-8", delete=False) as handle:
             handle.write('{"title":"Buy batteries","folder":"Personal"}')
             handle.flush()
-            args = type(
-                "Args",
-                (),
-                {"stdin_json": False, "json": None, "json_file": handle.name},
-            )()
+            path = handle.name
+        self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
+        args = type(
+            "Args",
+            (),
+            {"stdin_json": False, "json": None, "json_file": path},
+        )()
 
-            payload = cli._load_add_payload(args)
+        payload = cli._load_add_payload(args)
 
         self.assertEqual(
             payload,
             {"title": "Buy batteries", "folder": "Personal"},
         )
+
+
+class LoadAddCsvRowsTests(unittest.TestCase):
+    def test_loads_headerless_csv_with_default_mapping(self) -> None:
+        with NamedTemporaryFile("w+", encoding="utf-8", newline="", delete=False) as handle:
+            handle.write("8½,criterion\nUgetsu,unknown\n")
+            handle.flush()
+            path = handle.name
+        self.addCleanup(lambda: os.remove(path) if os.path.exists(path) else None)
+        args = type(
+            "Args",
+            (),
+            {
+                "stdin_csv": False,
+                "stdin_json": False,
+                "json": None,
+                "json_file": None,
+                "csv_file": path,
+                "csv_columns": "title,tag",
+            },
+        )()
+
+        rows = cli._load_add_csv_rows(args)
+
+        self.assertEqual(
+            rows,
+            [
+                {"title": "8½", "tag": "criterion"},
+                {"title": "Ugetsu", "tag": "unknown"},
+            ],
+        )
+
+    def test_rejects_csv_column_sets_without_title(self) -> None:
+        args = type(
+            "Args",
+            (),
+            {
+                "stdin_csv": False,
+                "stdin_json": False,
+                "json": None,
+                "json_file": None,
+                "csv_file": "unused.csv",
+                "csv_columns": "note,tags",
+            },
+        )()
+
+        with self.assertRaisesRegex(ValueError, "must include 'title'"):
+            with patch("builtins.open"), patch("td.cli.csv.reader", return_value=[["a", "b"]]):
+                cli._load_add_csv_rows(args)
 
 
 if __name__ == "__main__":

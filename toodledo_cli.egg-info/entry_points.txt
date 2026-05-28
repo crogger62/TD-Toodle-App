@@ -1,0 +1,3 @@
+[console_scripts]
+td = td.cli:main
+tdmedia = tdmedia.cli:main
