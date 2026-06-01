@@ -1,0 +1,10 @@
+[Unit]
+Description=Run td bump-overdue daily at 2:00 AM
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+Unit=td-bump-overdue.service
+
+[Install]
+WantedBy=timers.target

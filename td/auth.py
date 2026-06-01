@@ -289,6 +289,20 @@ def load_config() -> Optional[dict]:
     return data
 
 
+def save_config(config: dict) -> None:
+    if not isinstance(config, dict):
+        raise ValueError("Config file must be a JSON object.")
+    path = _config_storage_path()
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    temp_path = f"{path}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as handle:
+        json.dump(config, handle, indent=2, sort_keys=True)
+    os.replace(temp_path, path)
+    if os.name != "nt":
+        os.chmod(path, 0o600)
+
+
 def ensure_tokens() -> dict:
     tokens = load_tokens_from_file()
     if tokens is None:

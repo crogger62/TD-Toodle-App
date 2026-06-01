@@ -8,6 +8,9 @@ from . import __version__
 from . import db
 from . import query as query_module
 from .sync import sync_watchlist
+from .web import DEFAULT_HOST
+from .web import DEFAULT_PORT
+from .web import serve_browser
 
 
 def _note_preview(value: Optional[str], width: int = 72) -> str:
@@ -142,6 +145,21 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    try:
+        serve_browser(
+            db_path=args.db,
+            host=args.host,
+            port=args.port,
+        )
+    except KeyboardInterrupt:
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        print(f"serve failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tdmedia")
     parser.add_argument("--db", help="Path to watchlist SQLite database")
@@ -189,6 +207,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include completed Toodledo tasks",
     )
     export_parser.set_defaults(func=cmd_export)
+
+    serve_parser = subparsers.add_parser("serve", help="Browse watch items in a local web UI")
+    serve_parser.add_argument("--host", default=DEFAULT_HOST, help="Bind host")
+    serve_parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Bind port")
+    serve_parser.set_defaults(func=cmd_serve)
 
     return parser
 

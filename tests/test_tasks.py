@@ -192,5 +192,45 @@ class LoadAddCsvRowsTests(unittest.TestCase):
                 cli._load_add_csv_rows(args)
 
 
+class LinearFolderConfigTests(unittest.TestCase):
+    @patch("td.cli.auth.load_config")
+    @patch("td.cli.tasks.resolve_folder_value")
+    def test_uses_configured_linear_folder_id_without_lookup(
+        self, mock_resolve_folder_value, mock_load_config
+    ) -> None:
+        mock_load_config.return_value = {"linear_folder_id": 12345}
+
+        folder_info = cli._get_linear_folder_info("token")
+
+        self.assertEqual(folder_info["id"], 12345)
+        self.assertEqual(folder_info["match_type"], "configured_id")
+        mock_resolve_folder_value.assert_not_called()
+
+    @patch("td.cli.auth.save_config")
+    @patch("td.cli.auth.load_config")
+    @patch("td.cli.tasks.resolve_folder_value")
+    def test_caches_linear_folder_id_after_lookup(
+        self, mock_resolve_folder_value, mock_load_config, mock_save_config
+    ) -> None:
+        mock_load_config.return_value = {
+            "client_id": "x",
+            "client_secret": "y",
+            "redirect_port": 8765,
+        }
+        mock_resolve_folder_value.return_value = {
+            "id": 67890,
+            "name": "Linear",
+            "input": "Linear",
+            "match_type": "exact_name",
+        }
+
+        folder_info = cli._get_linear_folder_info("token")
+
+        self.assertEqual(folder_info["id"], 67890)
+        mock_save_config.assert_called_once()
+        saved_config = mock_save_config.call_args.args[0]
+        self.assertEqual(saved_config["linear_folder_id"], 67890)
+
+
 if __name__ == "__main__":
     unittest.main()

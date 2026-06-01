@@ -338,6 +338,34 @@ def _next_monday(today: date) -> date:
     return today + __import__("datetime").timedelta(days=days_ahead)
 
 
+def _get_linear_folder_info(access_token: str) -> dict:
+    config = auth.load_config() or {}
+    configured_id = config.get("linear_folder_id")
+    if configured_id not in (None, ""):
+        try:
+            folder_id = int(configured_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("linear_folder_id in config.json must be an integer.") from exc
+        return {
+            "id": folder_id,
+            "name": "Linear",
+            "input": configured_id,
+            "match_type": "configured_id",
+        }
+
+    folder_info = tasks.resolve_folder_value(access_token, "Linear")
+    if folder_info is None:
+        raise RuntimeError("Unable to resolve Linear folder.")
+
+    updated_config = dict(config)
+    updated_config["linear_folder_id"] = int(folder_info["id"])
+    try:
+        auth.save_config(updated_config)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: failed to cache linear_folder_id: {exc}")
+    return folder_info
+
+
 def cmd_linear_update(args: argparse.Namespace) -> int:
     try:
         tokens = auth.ensure_tokens()
@@ -347,14 +375,14 @@ def cmd_linear_update(args: argparse.Namespace) -> int:
                 f"Access token lacks write scope (scope='{scope}'). Re-run login."
             )
 
-        # Resolve "Linear" folder ID
+        # Resolve "Linear" folder ID, preferably from cached config
         try:
-            folder_info = tasks.resolve_folder_value(tokens["access_token"], "Linear")
+            folder_info = _get_linear_folder_info(tokens["access_token"])
         except Exception as exc:  # noqa: BLE001
             if not _is_auth_error(exc):
                 raise
             tokens = auth.refresh_on_failure(tokens, exc)
-            folder_info = tasks.resolve_folder_value(tokens["access_token"], "Linear")
+            folder_info = _get_linear_folder_info(tokens["access_token"])
 
         folder_id = folder_info["id"]
         target_date = _next_monday(date.today())

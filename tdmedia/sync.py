@@ -6,8 +6,8 @@ from td import tasks
 from . import db
 
 
-WATCHLIST_FOLDER = "WatchList"
-WATCHLIST_FIELDS = "folder,tag,note,modified,completed"
+WATCHLIST_FOLDERS = ("WatchList", "Watch List")
+WATCHLIST_FIELDS = "folder,tag,note"
 
 
 def _is_auth_error(exc: Exception) -> bool:
@@ -15,10 +15,19 @@ def _is_auth_error(exc: Exception) -> bool:
 
 
 def _watchlist_folder_id(access_token: str) -> int:
-    folder_info = tasks.resolve_folder_value(access_token, WATCHLIST_FOLDER)
-    if folder_info is None:
-        raise RuntimeError(f"Unable to resolve {WATCHLIST_FOLDER} folder.")
-    return int(folder_info["id"])
+    for folder_name in WATCHLIST_FOLDERS:
+        try:
+            folder_info = tasks.resolve_folder_value(access_token, folder_name)
+        except ValueError as exc:
+            if str(exc) == f"Unknown folder: {folder_name}":
+                continue
+            raise
+        if folder_info is not None:
+            return int(folder_info["id"])
+    raise RuntimeError(
+        "Unable to resolve WatchList folder. Tried: "
+        + ", ".join(WATCHLIST_FOLDERS)
+    )
 
 
 def _fetch_watchlist_tasks(access_token: str, folder_id: int) -> Iterable[dict]:
@@ -45,7 +54,7 @@ def sync_watchlist(db_path: Optional[str] = None) -> dict:
     with db.connect(db_path) as conn:
         imported = db.upsert_items(conn, rows)
     return {
-        "folder": WATCHLIST_FOLDER,
+        "folder": "Watch List",
         "folder_id": folder_id,
         "fetched": len(fetched),
         "imported": imported,

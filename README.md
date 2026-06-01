@@ -230,6 +230,35 @@ python3 -m td bump-overdue --limit 5 --apply
 
 ---
 
+## Daily Scheduling
+
+On `servcrog`, overdue tasks are currently updated automatically every day at `2:00 AM`
+using a user-level `systemd` timer.
+
+Command run by the timer:
+
+```bash
+/home/crog/Projects/TD-Toodle-App/.venv/bin/td bump-overdue --apply
+```
+
+Useful checks:
+
+```bash
+systemctl --user list-timers td-bump-overdue.timer --all
+systemctl --user status td-bump-overdue.timer
+journalctl --user -u td-bump-overdue.service -n 50 --no-pager
+```
+
+Repo timer files:
+
+- `deploy/systemd/td-bump-overdue.service`
+- `deploy/systemd/td-bump-overdue.timer`
+
+See `docs/scheduler.md` and `docs/how-to-bump-daily.md` for the full Linux and
+Windows scheduling setup.
+
+---
+
 ## Token Storage
 
 | Platform | config.json | tokens.json |
@@ -261,16 +290,89 @@ docs/               # Additional documentation
 
 ## WatchList Media Catalog
 
-`tdmedia` imports video media tasks from the Toodledo `WatchList` folder into a
+`tdmedia` imports video media tasks from the Toodledo `Watch List` folder into a
 local SQLite catalog so they can be queried outside Toodledo.
 
 ```bash
 python3 -m tdmedia sync
 python3 -m tdmedia services
-python3 -m tdmedia list --service Netflix
+python3 -m tdmedia list --service netflix
 python3 -m tdmedia search "spy"
+python3 -m tdmedia serve
 ```
 
 The catalog stores the Toodledo title, tag-derived streaming service, notes, and
 task ID. See `docs/watchlist-implementation-plan.md` for the implementation
 plan and next milestones.
+
+### Current Status
+
+The local Watch List workflow is working end to end in this repository:
+
+- `tdmedia sync` imports from Toodledo into `~/.config/toodledo-cli/watchlist.sqlite`
+- `tdmedia services`, `list`, `search`, `show`, and `export` work against the local SQLite catalog
+- `tdmedia serve` launches a local browser UI
+- service normalization now lowercases service names, preserves `raw_tags`, fixes a few obvious typos, and drops noisy non-service tags to `None`
+
+Default browser URL:
+
+```text
+http://servcrog:8766
+```
+
+You can also run it locally on the machine itself:
+
+```text
+http://127.0.0.1:8766
+```
+
+### Add New Movies Or Shows
+
+The current source of truth is still Toodledo. To add something new to watch:
+
+1. Add the item in Toodledo.
+2. Put it in the `Watch List` folder.
+3. Add any useful tags and notes there.
+4. Resync the local catalog.
+
+Example:
+
+```bash
+td add --json '{"title":"Severance","folder":"Watch List","tags":"apple","note":"season 2"}'
+tdmedia sync
+```
+
+After syncing, the new item will appear in:
+
+- `tdmedia list`
+- `tdmedia search`
+- `tdmedia services`
+- the browser UI at `http://servcrog:8766`
+
+### Browse The Database
+
+Command-line inspection:
+
+```bash
+tdmedia services
+tdmedia list
+tdmedia search "netflix"
+tdmedia show 596006937
+tdmedia export --format json
+```
+
+Direct SQLite inspection:
+
+```bash
+sqlite3 ~/.config/toodledo-cli/watchlist.sqlite
+```
+
+Useful queries:
+
+```sql
+.tables
+.schema watch_items
+select count(*) from watch_items;
+select service, count(*) from watch_items group by service order by count desc;
+select toodledo_id, title, raw_tags from watch_items where service is null limit 20;
+```

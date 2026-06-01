@@ -2,11 +2,13 @@ import sqlite3
 from typing import Iterable, Optional
 
 
-def list_items(
-    conn: sqlite3.Connection,
+def _browse_where(
     service: Optional[str] = None,
     include_completed: bool = False,
-) -> list[sqlite3.Row]:
+    query_text: Optional[str] = None,
+    uncategorized_only: bool = False,
+    has_notes: bool = False,
+) -> tuple[list[str], dict]:
     where = []
     params = {}
     if not include_completed:
@@ -14,6 +16,25 @@ def list_items(
     if service:
         where.append("service IS NOT NULL AND lower(service) = lower(:service)")
         params["service"] = service.strip()
+    if query_text:
+        where.append("(lower(title) LIKE :q OR lower(coalesce(notes, '')) LIKE :q)")
+        params["q"] = f"%{query_text.lower()}%"
+    if uncategorized_only:
+        where.append("service IS NULL")
+    if has_notes:
+        where.append("trim(coalesce(notes, '')) <> ''")
+    return where, params
+
+
+def list_items(
+    conn: sqlite3.Connection,
+    service: Optional[str] = None,
+    include_completed: bool = False,
+) -> list[sqlite3.Row]:
+    where, params = _browse_where(
+        service=service,
+        include_completed=include_completed,
+    )
     sql = "SELECT * FROM watch_items"
     if where:
         sql += " WHERE " + " AND ".join(where)
@@ -26,10 +47,10 @@ def search_items(
     query: str,
     include_completed: bool = False,
 ) -> list[sqlite3.Row]:
-    where = ["(lower(title) LIKE :q OR lower(coalesce(notes, '')) LIKE :q)"]
-    params = {"q": f"%{query.lower()}%"}
-    if not include_completed:
-        where.append("completed = 0")
+    where, params = _browse_where(
+        include_completed=include_completed,
+        query_text=query,
+    )
     sql = (
         "SELECT * FROM watch_items WHERE "
         + " AND ".join(where)
@@ -65,3 +86,27 @@ def iter_export_rows(
     include_completed: bool = False,
 ) -> Iterable[sqlite3.Row]:
     yield from list_items(conn, include_completed=include_completed)
+
+
+def browse_items(
+    conn: sqlite3.Connection,
+    service: Optional[str] = None,
+    include_completed: bool = False,
+    query_text: Optional[str] = None,
+    uncategorized_only: bool = False,
+    has_notes: bool = False,
+    limit: int = 250,
+) -> list[sqlite3.Row]:
+    where, params = _browse_where(
+        service=service,
+        include_completed=include_completed,
+        query_text=query_text,
+        uncategorized_only=uncategorized_only,
+        has_notes=has_notes,
+    )
+    sql = "SELECT * FROM watch_items"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY lower(coalesce(service, '')), lower(title), toodledo_id LIMIT :limit"
+    params["limit"] = max(1, min(limit, 1000))
+    return list(conn.execute(sql, params))

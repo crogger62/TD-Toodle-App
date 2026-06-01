@@ -10,8 +10,11 @@ from tdmedia import sync
 
 class DbTests(unittest.TestCase):
     def test_normalizes_first_tag_as_service(self) -> None:
-        self.assertEqual(db.normalize_service(" Netflix , comedy "), "Netflix")
-        self.assertEqual(db.normalize_service("Prime   Video"), "Prime Video")
+        self.assertEqual(db.normalize_service(" Netflix , comedy "), "netflix")
+        self.assertEqual(db.normalize_service("Prime   Video"), "prime video")
+        self.assertEqual(db.normalize_service("shuddder, horror"), "shudder")
+        self.assertIsNone(db.normalize_service("watch list, netflix"))
+        self.assertIsNone(db.normalize_service("unknown"))
         self.assertIsNone(db.normalize_service(""))
 
     def test_row_from_task_maps_toodledo_fields(self) -> None:
@@ -30,7 +33,7 @@ class DbTests(unittest.TestCase):
 
         self.assertEqual(row["toodledo_id"], 123)
         self.assertEqual(row["title"], "The Diplomat")
-        self.assertEqual(row["service"], "Netflix")
+        self.assertEqual(row["service"], "netflix")
         self.assertEqual(row["raw_tags"], "Netflix,politics")
         self.assertEqual(row["notes"], "Season 2")
         self.assertEqual(row["folder_id"], 99)
@@ -57,7 +60,7 @@ class DbTests(unittest.TestCase):
         self.assertEqual(db.upsert_items(conn, [second]), 1)
         row = conn.execute("SELECT * FROM watch_items WHERE toodledo_id = 1").fetchone()
         self.assertEqual(row["title"], "New")
-        self.assertEqual(row["service"], "Hulu")
+        self.assertEqual(row["service"], "hulu")
         self.assertEqual(row["imported_at"], "second")
 
 
@@ -117,8 +120,33 @@ class QueryTests(unittest.TestCase):
         rows = query.service_counts(self.conn)
         self.assertEqual(
             [(row["service"], row["count"]) for row in rows],
-            [("Hulu", 1), ("Netflix", 1)],
+            [("hulu", 1), ("netflix", 1)],
         )
+
+    def test_browse_items_supports_uncategorized_and_has_notes(self) -> None:
+        db.upsert_items(
+            self.conn,
+            [
+                db.row_from_task(
+                    {
+                        "id": 4,
+                        "title": "Mystery Queue",
+                        "tag": "watch list",
+                        "note": "needs sorting",
+                    },
+                    10,
+                    "now",
+                )
+            ],
+        )
+
+        rows = query.browse_items(
+            self.conn,
+            uncategorized_only=True,
+            has_notes=True,
+        )
+
+        self.assertEqual([row["toodledo_id"] for row in rows], [4])
 
 
 class SyncTests(unittest.TestCase):
@@ -149,7 +177,7 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(result["fetched"], 1)
         self.assertEqual(result["imported"], 1)
         row = conn.execute("SELECT title, service FROM watch_items").fetchone()
-        self.assertEqual((row["title"], row["service"]), ("Keep", "Netflix"))
+        self.assertEqual((row["title"], row["service"]), ("Keep", "netflix"))
 
 
 if __name__ == "__main__":

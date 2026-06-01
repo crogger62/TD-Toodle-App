@@ -1,0 +1,7 @@
+[Unit]
+Description=Update overdue Toodledo task dates to today
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/crog/Projects/TD-Toodle-App
+ExecStart=/home/crog/Projects/TD-Toodle-App/.venv/bin/td bump-overdue --apply

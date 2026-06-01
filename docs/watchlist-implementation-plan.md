@@ -14,6 +14,68 @@ show me everything tagged Hulu
 search my saved watch list for "spy"
 ```
 
+## Session Update
+
+This repository now has a working first version of the Watch List catalog and browser workflow.
+
+Completed in this session:
+
+- Added the `tdmedia` package and CLI entry point.
+- Added SQLite schema creation and local catalog storage at `~/.config/toodledo-cli/watchlist.sqlite`.
+- Added sync from Toodledo into the local database.
+- Added local query commands:
+  - `tdmedia list`
+  - `tdmedia search`
+  - `tdmedia services`
+  - `tdmedia show`
+  - `tdmedia export`
+- Added a local browser UI with `tdmedia serve`.
+- Adjusted folder resolution to tolerate both `WatchList` and `Watch List`.
+- Corrected the requested Toodledo task field list for live sync.
+- Added service normalization:
+  - lowercase normalized services
+  - preserve original tags in `raw_tags`
+  - map a few obvious typos and aliases
+  - drop noisy non-service tags to `None`
+- Verified live sync against Toodledo and imported the current catalog successfully.
+
+Current known working URLs:
+
+```text
+http://127.0.0.1:8766
+http://servcrog:8766
+```
+
+Current live behavior:
+
+- Toodledo remains the source of truth for adding new items.
+- `tdmedia` is the local read/query/browser layer.
+- New items appear locally after running `tdmedia sync`.
+
+## How To Add New Movies Or Shows
+
+Right now, new media items should be added in Toodledo first, then synced locally.
+
+Recommended workflow:
+
+1. Create the item in Toodledo.
+2. Put it in the `Watch List` folder.
+3. Add service tags and notes there if helpful.
+4. Run:
+
+   ```bash
+   tdmedia sync
+   ```
+
+Example:
+
+```bash
+td add --json '{"title":"Severance","folder":"Watch List","tags":"apple","note":"season 2"}'
+tdmedia sync
+```
+
+This keeps Toodledo as the authoritative store while the local SQLite catalog and browser UI are refreshed from it.
+
 ## Source Data
 
 The source of truth for capture remains Toodledo.
@@ -232,6 +294,7 @@ python -m tdmedia list --service Netflix
 python -m tdmedia search "spy"
 python -m tdmedia services
 python -m tdmedia show TOODLEDO_ID
+python -m tdmedia serve
 ```
 
 Optional export command:
@@ -304,6 +367,8 @@ Max            11
 - Add database path helper.
 - Add tests for schema creation and service normalization.
 
+Status: completed.
+
 ### Milestone 2: WatchList Sync
 
 - Resolve `WatchList` folder through the existing Toodledo folder API.
@@ -311,6 +376,8 @@ Max            11
 - Import `title`, `tag`, `note`, `id`, `modified`, and `completed`.
 - Upsert into SQLite.
 - Add a dry-run or summary output.
+
+Status: completed for the current read-only sync workflow.
 
 ### Milestone 3: Local Queries
 
@@ -320,11 +387,15 @@ Max            11
 - Add `services`.
 - Keep all queries local against SQLite.
 
+Status: completed. `show` and a local browser UI were also added.
+
 ### Milestone 4: Export
 
 - Add JSON export.
 - Add CSV export.
 - Consider Markdown export if useful for Obsidian or note-taking workflows.
+
+Status: JSON and CSV export completed. Markdown export not started.
 
 ### Milestone 5: Optional Write-Back
 
@@ -340,6 +411,8 @@ python -m tdmedia push
 ```
 
 Write-back should remain explicit and should probably default to dry-run.
+
+Status: not started.
 
 ## Testing Plan
 

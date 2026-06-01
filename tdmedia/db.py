@@ -5,6 +5,26 @@ from typing import Iterable, Optional
 
 
 DB_FILENAME = "watchlist.sqlite"
+NON_SERVICE_TAGS = {
+    "find",
+    "list",
+    "statistics",
+    "stream",
+    "streaming service",
+    "tofind",
+    "tv",
+    "unknown",
+    "video",
+    "watch",
+    "watch list",
+    "website",
+}
+SERVICE_ALIASES = {
+    "nbc": "nbc",
+    "peacock": "peacock",
+    "trutv": "trutv",
+    "shuddder": "shudder",
+}
 
 
 def storage_dir() -> str:
@@ -64,7 +84,10 @@ def normalize_service(raw_tags: Optional[str]) -> Optional[str]:
     for item in str(raw_tags).split(","):
         tag = item.strip()
         if tag:
-            return " ".join(tag.split())
+            normalized = " ".join(tag.split()).lower()
+            if normalized in NON_SERVICE_TAGS:
+                return None
+            return SERVICE_ALIASES.get(normalized, normalized)
     return None
 
 

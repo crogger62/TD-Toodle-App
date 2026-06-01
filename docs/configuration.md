@@ -14,11 +14,15 @@ Expected shape:
 {
   "client_id": "YOUR_TOODLEDO_CLIENT_ID",
   "client_secret": "YOUR_TOODLEDO_CLIENT_SECRET",
-  "redirect_port": 8765
+  "redirect_port": 8765,
+  "linear_folder_id": 123456
 }
 ```
 
 `redirect_port` is optional. If omitted, the default is `8765`.
+`linear_folder_id` is optional. If present, `td linear-update` will use that
+cached folder ID directly instead of calling the Toodledo folders API to resolve
+the `Linear` folder by name.
 
 ### tokens.json
 
