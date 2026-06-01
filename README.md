@@ -200,6 +200,14 @@ python3 -m td linear-update
 python3 -m td linear-update --apply
 ```
 
+`td linear-update` now supports a cached `linear_folder_id` in `config.json`.
+If that value is present, the command uses it directly instead of calling the
+Toodledo folders API to resolve the `Linear` folder by name on every run.
+
+If `linear_folder_id` is not present, the command falls back to resolving the
+folder by name and will cache the resolved ID back into `config.json` after a
+successful lookup.
+
 **Options:**
 
 | Flag | Description |

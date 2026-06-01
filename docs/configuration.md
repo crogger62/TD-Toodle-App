@@ -24,6 +24,10 @@ Expected shape:
 cached folder ID directly instead of calling the Toodledo folders API to resolve
 the `Linear` folder by name.
 
+If `linear_folder_id` is missing, `td linear-update` will fall back to resolving
+the `Linear` folder by name and will cache the resolved ID back into
+`config.json` after a successful lookup.
+
 ### tokens.json
 
 Stores the OAuth tokens after login.
