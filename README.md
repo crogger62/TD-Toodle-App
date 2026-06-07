@@ -238,6 +238,38 @@ python3 -m td bump-overdue --limit 5 --apply
 
 ---
 
+### `mirror`
+Maintain a read-only local SQLite mirror of incomplete Toodledo tasks and folders.
+
+```bash
+# Fetch from Toodledo and publish mirror/toodledo.db
+python3 -m td mirror sync
+
+# Fetch only to mirror/exports/
+python3 -m td mirror fetch
+
+# Rebuild SQLite from the latest export without calling Toodledo
+python3 -m td mirror import
+
+# Show latest mirror status
+python3 -m td mirror status
+```
+
+The mirror stores raw notes and tags in SQLite rather than CSV, so commas,
+quotes, newlines, and Unicode note text do not need special CSV handling. Runtime
+mirror files under `mirror/` are ignored by git.
+
+On Windows, register the daily mirror sync task from the repo root:
+
+```powershell
+.\deploy\windows\register-toodledo-mirror-sync.ps1
+```
+
+See `docs/toodledo-mirror-sync.md` for setup details and manual Task Scheduler
+steps.
+
+---
+
 ## Daily Scheduling
 
 On `servcrog`, overdue tasks are currently updated automatically every day at `2:00 AM`
@@ -262,8 +294,14 @@ Repo timer files:
 - `deploy/systemd/td-bump-overdue.service`
 - `deploy/systemd/td-bump-overdue.timer`
 
-See `docs/scheduler.md` and `docs/how-to-bump-daily.md` for the full Linux and
-Windows scheduling setup.
+The Toodledo local mirror can be scheduled daily on Windows with:
+
+```powershell
+.\deploy\windows\register-toodledo-mirror-sync.ps1
+```
+
+See `docs/scheduler.md`, `docs/how-to-bump-daily.md`, and
+`docs/toodledo-mirror-sync.md` for the full scheduling setup.
 
 ---
 
@@ -294,6 +332,7 @@ td/
   tasks.py          # Toodledo API calls (add, edit, fetch, folders)
 tdmedia/            # Local WatchList media catalog and queries
 docs/               # Additional documentation
+mirror/             # Ignored runtime local mirror DB, exports, and logs
 ```
 
 ## WatchList Media Catalog

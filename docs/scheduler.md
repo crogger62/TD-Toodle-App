@@ -1,6 +1,6 @@
 ## Scheduler
 
-This project currently has two supported scheduling patterns.
+This project currently has three supported scheduling patterns.
 
 ### Linux `systemd --user` Timer On `servcrog`
 
@@ -100,7 +100,40 @@ Recommended behavior:
 
 ### Windows Task Scheduler
 
-Windows still uses the PowerShell wrapper pattern.
+Windows uses Task Scheduler for both overdue-task updates and the local mirror
+sync.
+
+#### Toodledo Local Mirror Sync
+
+The read-only local mirror should run daily via:
+
+```powershell
+python -m td mirror sync
+```
+
+Register or update the scheduled task from the repo root:
+
+```powershell
+.\deploy\windows\register-toodledo-mirror-sync.ps1
+```
+
+Defaults:
+
+- Task name: `Toodledo Local Mirror Sync`
+- Schedule: daily at `02:15`
+- Start in: `V:\Projects\ToodleAPI`
+- Published DB: `mirror/toodledo.db`
+
+Run once immediately after registering:
+
+```powershell
+.\deploy\windows\register-toodledo-mirror-sync.ps1 -RunNow
+```
+
+See `docs/toodledo-mirror-sync.md` for full setup, manual Task Scheduler steps,
+and useful maintenance commands.
+
+#### Bump Overdue
 
 Program/script:
 

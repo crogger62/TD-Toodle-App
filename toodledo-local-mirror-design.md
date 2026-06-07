@@ -25,7 +25,8 @@ via a **periodic sync** process; no write-back to Toodledo.
 ## Resolved implementation decisions
 
 1. **Sync cadence** — daily scheduled sync, with an on-demand CLI command:
-   `td mirror sync`.
+   `td mirror sync`. On Windows, the daily task can be registered with
+   `deploy/windows/register-toodledo-mirror-sync.ps1`.
 2. **Storage layout** — mirror artifacts live in the repo's `mirror/`
    subdirectory. The published SQLite file is `mirror/toodledo.db`, exports are
    written under `mirror/exports/`, and sync activity is appended to
@@ -175,6 +176,12 @@ together by a wrapper script once both are stable.
 **Wrapper** (`td mirror sync`)
 - Once both stages are stable, a thin wrapper script runs fetch → import in
   sequence as the single entry point invoked by the scheduled task.
+
+**Windows scheduled task**
+- The repo includes `deploy/windows/register-toodledo-mirror-sync.ps1` to create
+  or update a daily Task Scheduler job named `Toodledo Local Mirror Sync`.
+- Manual Task Scheduler setup and maintenance commands are documented in
+  `docs/toodledo-mirror-sync.md`.
 
 ## Out of scope
 - Any write-back path from the mirror to Toodledo (explicitly excluded).
