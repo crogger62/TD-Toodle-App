@@ -9,6 +9,7 @@ import requests
 
 from . import auth
 from . import __version__
+from . import mirror
 from . import tasks
 from .list_cmd import cmd_list
 
@@ -245,6 +246,50 @@ def _load_add_csv_rows(args: argparse.Namespace) -> List[dict]:
 
 def _print_json(payload: dict) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def cmd_mirror_fetch(args: argparse.Namespace) -> int:
+    try:
+        result = mirror.fetch_export(export_dir=args.export_dir)
+        _print_json({"ok": True, **result})
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        _print_json({"ok": False, "error": str(exc)})
+        return 1
+
+
+def cmd_mirror_import(args: argparse.Namespace) -> int:
+    try:
+        result = mirror.import_export(
+            export_file=args.export_file,
+            db_path=args.db,
+            export_dir=args.export_dir,
+        )
+        _print_json({"ok": True, **result})
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        _print_json({"ok": False, "error": str(exc)})
+        return 1
+
+
+def cmd_mirror_sync(args: argparse.Namespace) -> int:
+    try:
+        result = mirror.sync()
+        _print_json({"ok": True, **result})
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        _print_json({"ok": False, "error": str(exc)})
+        return 1
+
+
+def cmd_mirror_status(args: argparse.Namespace) -> int:
+    try:
+        result = mirror.status(args.db)
+        _print_json({"ok": True, **result})
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        _print_json({"ok": False, "error": str(exc)})
+        return 1
 
 
 def _create_task_with_lookup(access_token: str, normalized_input: dict) -> tuple[dict, Optional[dict]]:
@@ -535,6 +580,41 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--format", choices=["text", "json"], default="text", help="Output format (default: text)")
     list_parser.add_argument("--folders", action="store_true", help="List available folders and exit")
     list_parser.set_defaults(func=cmd_list)
+
+    mirror_parser = subparsers.add_parser("mirror", help="Manage the local read-only Toodledo mirror")
+    mirror_subparsers = mirror_parser.add_subparsers(dest="mirror_command", required=True)
+
+    mirror_fetch_parser = mirror_subparsers.add_parser("fetch", help="Fetch Toodledo data to a JSON export")
+    mirror_fetch_parser.add_argument(
+        "--export-dir",
+        help="Directory for export JSON files (default: mirror/exports)",
+    )
+    mirror_fetch_parser.set_defaults(func=cmd_mirror_fetch)
+
+    mirror_import_parser = mirror_subparsers.add_parser("import", help="Import an export JSON into SQLite")
+    mirror_import_parser.add_argument(
+        "--export-file",
+        help="Export JSON to import (default: newest export in mirror/exports)",
+    )
+    mirror_import_parser.add_argument(
+        "--export-dir",
+        help="Directory to search for newest export (default: mirror/exports)",
+    )
+    mirror_import_parser.add_argument(
+        "--db",
+        help="SQLite DB path to publish (default: mirror/toodledo.db)",
+    )
+    mirror_import_parser.set_defaults(func=cmd_mirror_import)
+
+    mirror_sync_parser = mirror_subparsers.add_parser("sync", help="Fetch and import in one run")
+    mirror_sync_parser.set_defaults(func=cmd_mirror_sync)
+
+    mirror_status_parser = mirror_subparsers.add_parser("status", help="Show mirror refresh status")
+    mirror_status_parser.add_argument(
+        "--db",
+        help="SQLite DB path to inspect (default: mirror/toodledo.db)",
+    )
+    mirror_status_parser.set_defaults(func=cmd_mirror_status)
 
     bump_parser = subparsers.add_parser(
         "bump-overdue", help="Move overdue tasks to today or a specified date"
