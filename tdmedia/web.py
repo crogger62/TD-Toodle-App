@@ -211,6 +211,12 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
   <title>tdmedia browser</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d6b5d'/%3E%3Cpath d='M24 18 L46 32 L24 46 Z' fill='%23f4efe5'/%3E%3C/svg%3E">
   <style>
+    /*
+      Palette vibe: warm cream "reading room" with a deep teal accent
+      (cream bg, near-black ink, muted brown-gray, teal highlights).
+      The dark variant below keeps the same warm undertones and just
+      inverts luminance, brightening the accent for contrast.
+    */
     :root {{
       --bg: #f4efe5;
       --panel: rgba(255, 252, 247, 0.94);
@@ -221,6 +227,18 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
       --accent-soft: rgba(13, 107, 93, 0.12);
       --shadow: 0 20px 45px rgba(72, 44, 18, 0.12);
       --radius: 22px;
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root {{
+        --bg: #1b1712;
+        --panel: rgba(38, 33, 27, 0.94);
+        --ink: #f1ece2;
+        --muted: #a89c8d;
+        --line: rgba(244, 239, 229, 0.12);
+        --accent: #2bb39e;
+        --accent-soft: rgba(43, 179, 158, 0.16);
+        --shadow: 0 20px 45px rgba(0, 0, 0, 0.4);
+      }}
     }}
     * {{ box-sizing: border-box; }}
     body {{
