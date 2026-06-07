@@ -209,6 +209,7 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>tdmedia browser</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d6b5d'/%3E%3Cpath d='M24 18 L46 32 L24 46 Z' fill='%23f4efe5'/%3E%3C/svg%3E">
   <style>
     :root {{
       --bg: #f4efe5;

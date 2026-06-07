@@ -319,7 +319,7 @@ The local Watch List workflow is working end to end in this repository:
 
 - `tdmedia sync` imports from Toodledo into `~/.config/toodledo-cli/watchlist.sqlite`
 - `tdmedia services`, `list`, `search`, `show`, and `export` work against the local SQLite catalog
-- `tdmedia serve` launches a local browser UI
+- `tdmedia serve` launches a local browser UI, complete with a tab/pinned-tab favicon
 - service normalization now lowercases service names, preserves `raw_tags`, fixes a few obvious typos, and drops noisy non-service tags to `None`
 
 Default browser URL:
