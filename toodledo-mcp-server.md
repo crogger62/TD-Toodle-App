@@ -10,10 +10,15 @@ A custom MCP (Model Context Protocol) server that exposes Toodledo task manageme
 
 | Component | Path |
 |---|---|
-| MCP server script | `C:\Users\craig\toodledo-mcp\toodledo_mcp.py` |
+| MCP server script (canonical, path-portable) | `V:\Projects\ToodleAPI\install\toodledo_mcp.py` |
+| MCP server script (original, Windows-only) | `C:\Users\craig\toodledo-mcp\toodledo_mcp.py` |
 | Backing library (`td` package) | `V:\Projects\ToodleAPI\` |
 | OAuth tokens | `%APPDATA%\toodledo-cli\tokens.json` → `C:\Users\craig\AppData\Roaming\toodledo-cli\tokens.json` |
 | OAuth app credentials | `%APPDATA%\toodledo-cli\config.json` |
+| Re-auth script (Windows) | `V:\Projects\ToodleAPI\install\reauth.ps1` |
+| Re-auth script (macOS/Linux) | `V:\Projects\ToodleAPI\install\reauth.sh` |
+| Claude skill | `~\.claude\skills\toodledo\SKILL.md` |
+| Install package | `V:\Projects\ToodleAPI\install\` |
 
 ---
 
@@ -24,12 +29,12 @@ A custom MCP (Model Context Protocol) server that exposes Toodledo task manageme
 Claude Code reads MCP servers from a **project-local config** written by `claude mcp add`:
 
 ```
-C:\Users\craig\.claude.json   ← project entry for V:\Projects\ClaudeRecovery
+C:\Users\craig\.claude.json   ← project entry for V:\Projects\ToodleAPI
 ```
 
-To add the server (already done):
+To add the server:
 ```powershell
-claude mcp add toodledo python "C:\Users\craig\toodledo-mcp\toodledo_mcp.py"
+claude mcp add toodledo python "V:\Projects\ToodleAPI\install\toodledo_mcp.py"
 ```
 
 This writes into `.claude.json` under the project key. The server is loaded fresh each Claude Code session.
@@ -87,24 +92,21 @@ OAuth 2.0 via the Toodledo API. Tokens are managed by `td.auth` in `V:\Projects\
 
 ### Re-authenticating from scratch
 
-Run this in PowerShell when tokens are fully dead:
+Run the re-auth script when tokens are fully dead:
 
+**Windows (PowerShell):**
 ```powershell
-python -c "
-import sys
-sys.path.insert(0, r'V:\Projects\ToodleAPI')
-from td.auth import _run_oauth_flow, _normalize_token_response, load_config, save_tokens_to_file
-cfg = load_config()
-raw = _run_oauth_flow(cfg['client_id'], cfg['client_secret'])
-tokens = _normalize_token_response(raw)
-save_tokens_to_file(tokens)
-print('Done - expires_at:', tokens['expires_at'])
-"
+V:\Projects\ToodleAPI\install\reauth.ps1
+```
+
+**macOS/Linux:**
+```bash
+~/Projects/ToodleAPI/install/reauth.sh
 ```
 
 This opens a browser to the Toodledo authorization page. After you approve, the browser redirects to `http://127.0.0.1:8765/` — the local server catches it, exchanges the code for tokens, and saves them to `tokens.json`.
 
-> **Note:** Do not paste the callback URL anywhere. The local HTTP server catches it automatically. If you see the browser show "Login complete — you may close this window", the flow succeeded.
+> **Note:** Do not paste the callback URL anywhere. The local HTTP server catches it automatically. When the browser shows "Login complete — you may close this window", the flow succeeded.
 
 ---
 
@@ -130,7 +132,7 @@ V:\Projects\ToodleAPI\td\   (td package)
 api.toodledo.com/3/
 ```
 
-The `td` package is not pip-installed — the server script injects `V:\Projects\ToodleAPI` into `sys.path` at startup.
+The `td` package is not pip-installed — the server script (`install/toodledo_mcp.py`) resolves the library via `Path(__file__).parent.parent`, so no hardcoded paths are needed and it works on any OS.
 
 ---
 
@@ -138,7 +140,7 @@ The `td` package is not pip-installed — the server script injects `V:\Projects
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Tools not available in Claude Code | Server not registered for this project | Run `claude mcp add toodledo python "C:\Users\craig\toodledo-mcp\toodledo_mcp.py"` |
+| Tools not available in Claude Code | Server not registered for this project | Run `claude mcp add toodledo python "V:\Projects\ToodleAPI\install\toodledo_mcp.py"` |
 | Tools not available in Claude Desktop | Config in wrong location or app not restarted | Ensure `%APPDATA%\Claude\claude_desktop_config.json` exists; quit and relaunch app |
-| `400 Bad Request` on token endpoint | Tokens expired | Re-run the OAuth flow above |
+| `400 Bad Request` on token endpoint | Tokens expired | Run `install\reauth.ps1` (Windows) or `install/reauth.sh` (macOS) |
 | Import errors on startup | `td` package missing or `V:\Projects\ToodleAPI` not accessible | Check that the V: drive is mounted |

@@ -310,6 +310,46 @@ def resolve_folder_value(access_token: str, folder_value) -> Optional[dict]:
     raise ValueError(f"Unknown folder: {folder_text}")
 
 
+def find_incomplete_tasks_by_title(
+    access_token: str,
+    title: str,
+    folder_id: Optional[int] = None,
+    tag: Optional[str] = None,
+    exact_only: bool = False,
+) -> "tuple[List[dict], str]":
+    """Find incomplete tasks matching a title.
+
+    Tries an exact (case-insensitive) match first. If nothing matches and
+    exact_only is False, falls back to a substring match. Returns the list
+    of matches and which strategy produced them ("exact" or "substring").
+    """
+    query = (title or "").strip()
+    if not query:
+        raise ValueError("Title cannot be blank.")
+    lowered = query.lower()
+    tag_lower = tag.strip().lower() if tag else None
+
+    candidates = []
+    for task in fetch_tasks(access_token, "folder,tag,duedate"):
+        if folder_id is not None and task.get("folder") != folder_id:
+            continue
+        if tag_lower is not None:
+            task_tags = [t.strip().lower() for t in (task.get("tag") or "").split(",")]
+            if tag_lower not in task_tags:
+                continue
+        if isinstance(task.get("title"), str):
+            candidates.append(task)
+
+    exact_matches = [t for t in candidates if t["title"].strip().lower() == lowered]
+    if exact_matches:
+        return exact_matches, "exact"
+    if exact_only:
+        return [], "exact"
+
+    substring_matches = [t for t in candidates if lowered in t["title"].lower()]
+    return substring_matches, "substring"
+
+
 def build_add_task_payload(normalized_input: dict, folder_info: Optional[dict]) -> dict:
     payload = {"title": normalized_input["title"]}
     if "due" in normalized_input:

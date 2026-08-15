@@ -2,7 +2,7 @@ import argparse
 import csv
 import json
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Iterable, List, Optional
 
 import requests
@@ -534,6 +534,89 @@ def cmd_bump_overdue(args: argparse.Namespace) -> int:
         return 1
 
 
+def _print_title_matches(matches: List[dict], match_type: str) -> None:
+    label = "Exact" if match_type == "exact" else "Partial"
+    print(f"{label} match(es):")
+    for task in matches:
+        due_date = _parse_task_date(task.get("duedate"))
+        due_fmt = due_date.strftime("%m/%d/%Y") if due_date else "N/A"
+        print(f"  {task.get('id')}\t[{due_fmt}]\t{task.get('title', '')}")
+
+
+def _fetch_title_matches(access_token: str, args: argparse.Namespace) -> "tuple[List[dict], str]":
+    folder_id = None
+    if args.folder:
+        folder_info = tasks.resolve_folder_value(access_token, args.folder)
+        folder_id = folder_info["id"] if folder_info else None
+    return tasks.find_incomplete_tasks_by_title(
+        access_token,
+        args.title,
+        folder_id=folder_id,
+        tag=args.tag,
+        exact_only=args.exact,
+    )
+
+
+def cmd_complete(args: argparse.Namespace) -> int:
+    try:
+        if args.ids and args.title:
+            raise ValueError("Provide either task ID(s) or --title, not both.")
+        if not args.ids and not args.title:
+            raise ValueError("Provide task ID(s) or --title to identify the task(s) to complete.")
+
+        tokens = auth.ensure_tokens()
+        scope = tokens.get("scope")
+        if scope and "write" not in scope.split():
+            raise RuntimeError(
+                f"Access token lacks write scope (scope='{scope}'). Re-run login."
+            )
+
+        if args.ids:
+            task_ids = list(args.ids)
+        else:
+            try:
+                matches, match_type = _fetch_title_matches(tokens["access_token"], args)
+            except Exception as exc:  # noqa: BLE001
+                if not _is_auth_error(exc):
+                    raise
+                tokens = auth.refresh_on_failure(tokens, exc)
+                matches, match_type = _fetch_title_matches(tokens["access_token"], args)
+
+            if not matches:
+                print(f"No matching incomplete task found for title: {args.title!r}")
+                return 1
+
+            _print_title_matches(matches, match_type)
+            if len(matches) > 1:
+                print("Multiple matches found. Narrow with --folder/--tag/--exact, or complete by ID.")
+                return 1
+            if not args.apply:
+                print("Dry run only. Re-run with --apply to mark this task complete.")
+                return 0
+            task_ids = [matches[0]["id"]]
+
+        epoch = int(datetime.now(timezone.utc).timestamp())
+        updates = [{"id": task_id, "completed": epoch} for task_id in task_ids]
+        try:
+            results = tasks.edit_tasks(tokens["access_token"], updates)
+        except Exception as exc:  # noqa: BLE001
+            tokens = auth.refresh_on_failure(tokens, exc)
+            results = tasks.edit_tasks(tokens["access_token"], updates)
+
+        errors = [item for item in results if item.get("errorCode")]
+        if errors:
+            print(f"Completed {len(task_ids) - len(errors)} task(s), {len(errors)} failed.")
+            for err in errors:
+                print(f"  Error {err.get('errorCode')}: {err.get('errorDesc')}")
+            return 1
+
+        print(f"Completed {len(task_ids)} task(s).")
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        print(f"complete failed: {exc}")
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="td")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -635,6 +718,29 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-recurring", action="store_true", help="Include recurring tasks when bumping"
     )
     bump_parser.set_defaults(func=cmd_bump_overdue)
+
+    complete_parser = subparsers.add_parser(
+        "complete", help="Mark task(s) complete by ID or by title"
+    )
+    complete_parser.add_argument(
+        "ids", nargs="*", type=int, help="Task ID(s) to mark complete directly (no dry run)"
+    )
+    complete_parser.add_argument(
+        "--title", help="Match an incomplete task by title (dry run by default)"
+    )
+    complete_parser.add_argument(
+        "--folder", help="Narrow --title search to a folder"
+    )
+    complete_parser.add_argument(
+        "--tag", help="Narrow --title search to a tag"
+    )
+    complete_parser.add_argument(
+        "--exact", action="store_true", help="Require an exact title match (no substring fallback)"
+    )
+    complete_parser.add_argument(
+        "--apply", action="store_true", help="Apply the --title match (default is dry run)"
+    )
+    complete_parser.set_defaults(func=cmd_complete)
 
     linear_parser = subparsers.add_parser(
         "linear-update",

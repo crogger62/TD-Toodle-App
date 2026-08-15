@@ -192,6 +192,63 @@ class LoadAddCsvRowsTests(unittest.TestCase):
                 cli._load_add_csv_rows(args)
 
 
+class FindIncompleteTasksByTitleTests(unittest.TestCase):
+    @patch("td.tasks.fetch_tasks")
+    def test_exact_match_takes_priority_over_substring(self, mock_fetch_tasks) -> None:
+        mock_fetch_tasks.return_value = [
+            {"id": 1, "title": "Buy milk", "folder": 10, "tag": ""},
+            {"id": 2, "title": "Buy milk and eggs", "folder": 10, "tag": ""},
+        ]
+
+        matches, match_type = tasks.find_incomplete_tasks_by_title("token", "buy milk")
+
+        self.assertEqual(match_type, "exact")
+        self.assertEqual([t["id"] for t in matches], [1])
+
+    @patch("td.tasks.fetch_tasks")
+    def test_falls_back_to_substring_match(self, mock_fetch_tasks) -> None:
+        mock_fetch_tasks.return_value = [
+            {"id": 1, "title": "Buy milk and eggs", "folder": 10, "tag": ""},
+            {"id": 2, "title": "Call the vet", "folder": 10, "tag": ""},
+        ]
+
+        matches, match_type = tasks.find_incomplete_tasks_by_title("token", "milk")
+
+        self.assertEqual(match_type, "substring")
+        self.assertEqual([t["id"] for t in matches], [1])
+
+    @patch("td.tasks.fetch_tasks")
+    def test_exact_only_skips_substring_fallback(self, mock_fetch_tasks) -> None:
+        mock_fetch_tasks.return_value = [
+            {"id": 1, "title": "Buy milk and eggs", "folder": 10, "tag": ""},
+        ]
+
+        matches, match_type = tasks.find_incomplete_tasks_by_title(
+            "token", "milk", exact_only=True
+        )
+
+        self.assertEqual(match_type, "exact")
+        self.assertEqual(matches, [])
+
+    @patch("td.tasks.fetch_tasks")
+    def test_filters_by_folder_and_tag(self, mock_fetch_tasks) -> None:
+        mock_fetch_tasks.return_value = [
+            {"id": 1, "title": "Buy milk", "folder": 10, "tag": "errands"},
+            {"id": 2, "title": "Buy milk", "folder": 20, "tag": "errands"},
+            {"id": 3, "title": "Buy milk", "folder": 10, "tag": "home"},
+        ]
+
+        matches, _ = tasks.find_incomplete_tasks_by_title(
+            "token", "Buy milk", folder_id=10, tag="errands"
+        )
+
+        self.assertEqual([t["id"] for t in matches], [1])
+
+    def test_rejects_blank_title(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Title cannot be blank"):
+            tasks.find_incomplete_tasks_by_title("token", "   ")
+
+
 class LinearFolderConfigTests(unittest.TestCase):
     @patch("td.cli.auth.load_config")
     @patch("td.cli.tasks.resolve_folder_value")
@@ -230,6 +287,113 @@ class LinearFolderConfigTests(unittest.TestCase):
         mock_save_config.assert_called_once()
         saved_config = mock_save_config.call_args.args[0]
         self.assertEqual(saved_config["linear_folder_id"], 67890)
+
+
+class CmdCompleteTests(unittest.TestCase):
+    def _make_args(self, ids=None, title=None, folder=None, tag=None, exact=False, apply=False):
+        return type(
+            "Args",
+            (),
+            {
+                "ids": ids or [],
+                "title": title,
+                "folder": folder,
+                "tag": tag,
+                "exact": exact,
+                "apply": apply,
+            },
+        )()
+
+    def test_rejects_both_ids_and_title(self) -> None:
+        args = self._make_args(ids=[1], title="Buy milk")
+
+        self.assertEqual(cli.cmd_complete(args), 1)
+
+    def test_rejects_neither_ids_nor_title(self) -> None:
+        args = self._make_args()
+
+        self.assertEqual(cli.cmd_complete(args), 1)
+
+    @patch("td.cli.tasks.edit_tasks")
+    @patch("td.cli.auth.ensure_tokens")
+    def test_completes_by_id_directly(self, mock_ensure_tokens, mock_edit_tasks) -> None:
+        mock_ensure_tokens.return_value = {"access_token": "tok", "scope": "read write"}
+        mock_edit_tasks.return_value = [{"id": 123}]
+        args = self._make_args(ids=[123])
+
+        result = cli.cmd_complete(args)
+
+        self.assertEqual(result, 0)
+        updates = mock_edit_tasks.call_args.args[1]
+        self.assertEqual(updates[0]["id"], 123)
+        self.assertIn("completed", updates[0])
+
+    @patch("td.cli.tasks.edit_tasks")
+    @patch("td.cli.tasks.find_incomplete_tasks_by_title")
+    @patch("td.cli.auth.ensure_tokens")
+    def test_dry_run_by_title_without_apply(
+        self, mock_ensure_tokens, mock_find, mock_edit_tasks
+    ) -> None:
+        mock_ensure_tokens.return_value = {"access_token": "tok", "scope": "read write"}
+        mock_find.return_value = ([{"id": 1, "title": "Buy milk", "duedate": 0}], "exact")
+        args = self._make_args(title="Buy milk")
+
+        result = cli.cmd_complete(args)
+
+        self.assertEqual(result, 0)
+        mock_edit_tasks.assert_not_called()
+
+    @patch("td.cli.tasks.edit_tasks")
+    @patch("td.cli.tasks.find_incomplete_tasks_by_title")
+    @patch("td.cli.auth.ensure_tokens")
+    def test_applies_single_title_match(
+        self, mock_ensure_tokens, mock_find, mock_edit_tasks
+    ) -> None:
+        mock_ensure_tokens.return_value = {"access_token": "tok", "scope": "read write"}
+        mock_find.return_value = ([{"id": 1, "title": "Buy milk", "duedate": 0}], "exact")
+        mock_edit_tasks.return_value = [{"id": 1}]
+        args = self._make_args(title="Buy milk", apply=True)
+
+        result = cli.cmd_complete(args)
+
+        self.assertEqual(result, 0)
+        updates = mock_edit_tasks.call_args.args[1]
+        self.assertEqual(updates[0]["id"], 1)
+        self.assertIn("completed", updates[0])
+
+    @patch("td.cli.tasks.edit_tasks")
+    @patch("td.cli.tasks.find_incomplete_tasks_by_title")
+    @patch("td.cli.auth.ensure_tokens")
+    def test_multiple_matches_blocks_completion(
+        self, mock_ensure_tokens, mock_find, mock_edit_tasks
+    ) -> None:
+        mock_ensure_tokens.return_value = {"access_token": "tok", "scope": "read write"}
+        mock_find.return_value = (
+            [
+                {"id": 1, "title": "Buy milk", "duedate": 0},
+                {"id": 2, "title": "Buy milk today", "duedate": 0},
+            ],
+            "substring",
+        )
+        args = self._make_args(title="milk", apply=True)
+
+        result = cli.cmd_complete(args)
+
+        self.assertEqual(result, 1)
+        mock_edit_tasks.assert_not_called()
+
+    @patch("td.cli.tasks.edit_tasks")
+    @patch("td.cli.tasks.find_incomplete_tasks_by_title")
+    @patch("td.cli.auth.ensure_tokens")
+    def test_no_matches_fails(self, mock_ensure_tokens, mock_find, mock_edit_tasks) -> None:
+        mock_ensure_tokens.return_value = {"access_token": "tok", "scope": "read write"}
+        mock_find.return_value = ([], "substring")
+        args = self._make_args(title="nonexistent", apply=True)
+
+        result = cli.cmd_complete(args)
+
+        self.assertEqual(result, 1)
+        mock_edit_tasks.assert_not_called()
 
 
 if __name__ == "__main__":

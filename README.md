@@ -131,6 +131,44 @@ python3 -m td add --csv-file tasks.csv --csv-columns title,folder,tags
 
 ---
 
+### `complete`
+Mark task(s) complete, either by explicit ID or by title lookup.
+
+```bash
+# By ID (one or more) — applies immediately, no dry run
+python3 -m td complete 123456789
+python3 -m td complete 123456789 987654321
+
+# By title — dry run by default, shows the match
+python3 -m td complete --title "Buy milk"
+
+# Narrow an ambiguous title match
+python3 -m td complete --title "Buy milk" --folder Personal
+python3 -m td complete --title "Buy milk" --tag errands
+python3 -m td complete --title "Buy milk" --exact
+
+# Apply the title match
+python3 -m td complete --title "Buy milk" --apply
+```
+
+Title lookup tries an exact (case-insensitive) match first; if nothing matches, it
+falls back to a substring match unless `--exact` is given. If more than one
+incomplete task matches, nothing is changed — narrow with `--folder`, `--tag`,
+or `--exact`, or complete by ID instead.
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `ids` | Task ID(s) to complete directly (bypasses dry run) |
+| `--title TEXT` | Match an incomplete task by title |
+| `--folder NAME` | Narrow `--title` search to a folder |
+| `--tag TAG` | Narrow `--title` search to a tag |
+| `--exact` | Require an exact title match (no substring fallback) |
+| `--apply` | Apply the `--title` match (default is dry run) |
+
+---
+
 ### `list`
 List incomplete tasks with optional filters.
 
@@ -320,19 +358,64 @@ Windows concrete example:
 
 ---
 
+## MCP Server (Claude Integration)
+
+The `install/` directory contains an MCP server that exposes Toodledo to Claude via natural language. It wraps the same `td` library used by the CLI.
+
+### Tools exposed
+
+| Tool | Description |
+|------|-------------|
+| `get_folders` | List all folders with IDs |
+| `get_tasks` | Retrieve incomplete tasks with filters (folder, tag, priority, due_today, due_this_week) |
+| `add_task` | Create a new task |
+| `edit_task` | Edit one or more tasks by ID |
+| `complete_task` | Mark a task complete |
+| `delete_task` | Permanently delete a task |
+| `bump_overdue` | Reschedule overdue tasks (dry-run by default) |
+| `linear_update` | Push Linear folder tasks to next Monday (dry-run by default) |
+
+### Quick setup
+
+1. Install dependencies: `pip install mcp requests`
+2. Place OAuth credentials in the platform config path (see **Token Storage** below)
+3. Authenticate: `install/reauth.sh` (macOS) or `install\reauth.ps1` (Windows)
+4. Register with Claude Code:
+   ```bash
+   # macOS
+   claude mcp add toodledo python3 ~/Projects/ToodleAPI/install/toodledo_mcp.py
+
+   # Windows
+   claude mcp add toodledo python V:\Projects\ToodleAPI\install\toodledo_mcp.py
+   ```
+5. Copy the Claude skill: `install/skill/SKILL.md` → `~/.claude/skills/toodledo/SKILL.md`
+
+See `install/INSTALL.md` for the full step-by-step guide and `toodledo-mcp-server.md` for implementation details.
+
+---
+
 ## Project Structure
 
 ```
-td/
-  __init__.py       # Version
-  __main__.py       # Entry point
-  auth.py           # OAuth2 token management
-  cli.py            # argparse subcommands
-  list_cmd.py       # 'list' command implementation
-  tasks.py          # Toodledo API calls (add, edit, fetch, folders)
-tdmedia/            # Local WatchList media catalog and queries
-docs/               # Additional documentation
-mirror/             # Ignored runtime local mirror DB, exports, and logs
+td/                     # CLI library
+  __init__.py           # Version
+  __main__.py           # Entry point
+  auth.py               # OAuth2 token management
+  cli.py                # argparse subcommands
+  list_cmd.py           # 'list' command implementation
+  tasks.py              # Toodledo API calls (add, edit, fetch, folders)
+tdmedia/                # Local WatchList media catalog and queries
+install/                # MCP server and cross-platform install package
+  toodledo_mcp.py       # FastMCP server (path-portable)
+  reauth.py             # OAuth re-auth script
+  reauth.sh             # Shell wrapper (macOS/Linux)
+  reauth.ps1            # PowerShell wrapper (Windows)
+  config.json.example   # OAuth credentials template
+  skill/SKILL.md        # Claude Code skill definition
+  INSTALL.md            # Step-by-step install guide
+docs/                   # Additional documentation
+mirror/                 # Ignored runtime local mirror DB, exports, and logs
+toodledo-mcp-server.md  # MCP server implementation notes
 ```
 
 ## WatchList Media Catalog
