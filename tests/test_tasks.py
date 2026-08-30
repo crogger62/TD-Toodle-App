@@ -5,10 +5,25 @@ from unittest.mock import patch
 import os
 
 from td import cli
+from td import auth
 from td import tasks
 
 
 class NormalizeAddTaskInputTests(unittest.TestCase):
+    def test_redacts_tokens_from_error_messages(self) -> None:
+        message = (
+            "429 Client Error: Too Many Requests for url: "
+            "https://api.toodledo.com/3/folders/get.php?access_token=secret&x=1 "
+            'payload={"refresh_token":"also-secret"}'
+        )
+
+        redacted = auth.redact_sensitive_text(message)
+
+        self.assertNotIn("secret", redacted)
+        self.assertNotIn("also-secret", redacted)
+        self.assertIn("access_token=[REDACTED]", redacted)
+        self.assertIn('"refresh_token":"[REDACTED]"', redacted)
+
     @patch("td.tasks.date")
     def test_applies_defaults_for_missing_optional_fields(self, mock_date) -> None:
         mock_date.today.return_value = date(2026, 3, 25)

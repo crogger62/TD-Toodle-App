@@ -1,11 +1,15 @@
 import html
 import json
 import socket
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse
 
+from td import auth
+
+from . import __version__
 from . import db
 from . import query as query_module
 from .sync import sync_watchlist
@@ -24,6 +28,25 @@ def _first_param(params: dict, name: str) -> str:
     return (params.get(name) or [""])[0].strip()
 
 
+def _format_sync_timestamp(value: Optional[str]) -> str:
+    if not value:
+        return "No successful sync recorded yet."
+    try:
+        timestamp = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    local_timestamp = timestamp.astimezone()
+    timezone_name = local_timestamp.tzname() or "local time"
+    return (
+        f"Last successful sync: {local_timestamp.strftime('%b')} "
+        f"{local_timestamp.day}, {local_timestamp.year} at "
+        f"{local_timestamp.strftime('%I:%M %p').lstrip('0')} "
+        f"{timezone_name}."
+    )
+
+
 def _build_query_string(
     search: str,
     service: str,
@@ -32,6 +55,7 @@ def _build_query_string(
     uncategorized_only: bool,
     has_notes: bool,
     message: str = "",
+    message_type: str = "",
 ) -> str:
     payload = {}
     if search:
@@ -48,6 +72,8 @@ def _build_query_string(
         payload["notes"] = "1"
     if message:
         payload["message"] = message
+    if message_type:
+        payload["message_type"] = message_type
     return urlencode(payload)
 
 
@@ -83,6 +109,7 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
     search = _first_param(params, "q")
     service = _first_param(params, "service")
     message = _first_param(params, "message")
+    message_type = _first_param(params, "message_type")
     include_completed = _bool_param(params, "completed")
     uncategorized_only = _bool_param(params, "uncategorized")
     has_notes = _bool_param(params, "notes")
@@ -90,6 +117,8 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
     selected_id = int(selected_raw) if selected_raw.isdigit() else None
 
     with db.connect(db_path) as conn:
+        last_sync = db.last_successful_sync(conn)
+        last_sync_run = db.latest_sync_run(conn)
         rows = query_module.browse_items(
             conn,
             service=service or None,
@@ -106,6 +135,15 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
         if selected_row is None and rows:
             selected_row = rows[0]
             selected_id = int(selected_row["toodledo_id"])
+
+    # Legacy error flashes did not include a type, so discard one when a later
+    # successful sync is already recorded instead of showing stale failure text.
+    if (
+        message_type == ""
+        and message.startswith("Sync failed:")
+        and last_sync_run is not None
+    ):
+        message = ""
 
     list_items = []
     for row in rows:
@@ -202,6 +240,18 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
     message_html = (
         f'<div class="flash">{html.escape(message)}</div>' if message else ""
     )
+    sync_status = _format_sync_timestamp(last_sync)
+    sync_metrics_html = ""
+    if last_sync_run is not None:
+        net_change = int(last_sync_run["added"]) - int(last_sync_run["deleted"])
+        sync_metrics_html = f"""
+        <dl class="sync-metrics" aria-label="Last sync metrics">
+          <div><dt>Fetched</dt><dd>{last_sync_run['fetched']}</dd></div>
+          <div><dt>Added</dt><dd>{last_sync_run['added']}</dd></div>
+          <div><dt>Deleted</dt><dd>{last_sync_run['deleted']}</dd></div>
+          <div><dt>Net change</dt><dd>{net_change:+d}</dd></div>
+        </dl>
+        """
 
     return f"""<!doctype html>
 <html lang="en">
@@ -209,35 +259,51 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>tdmedia browser</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d6b5d'/%3E%3Cpath d='M24 18 L46 32 L24 46 Z' fill='%23f4efe5'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%235b7553'/%3E%3Cpath d='M24 18 L46 32 L24 46 Z' fill='%23c3e8bd'/%3E%3C/svg%3E">
   <style>
-    /*
-      Palette vibe: warm cream "reading room" with a deep teal accent
-      (cream bg, near-black ink, muted brown-gray, teal highlights).
-      The dark variant below keeps the same warm undertones and just
-      inverts luminance, brightening the accent for contrast.
-    */
     :root {{
-      --bg: #f4efe5;
-      --panel: rgba(255, 252, 247, 0.94);
-      --ink: #1f1b16;
-      --muted: #6f6458;
-      --line: rgba(84, 64, 40, 0.14);
-      --accent: #0d6b5d;
-      --accent-soft: rgba(13, 107, 93, 0.12);
-      --shadow: 0 20px 45px rgba(72, 44, 18, 0.12);
+      --bg: #c3e8bd;
+      --panel: rgba(238, 250, 234, 0.9);
+      --ink: #040403;
+      --muted: #5b7553;
+      --line: rgba(91, 117, 83, 0.24);
+      --accent: #5b7553;
+      --accent-soft: rgba(142, 184, 151, 0.42);
+      --shadow: 0 20px 45px rgba(4, 4, 3, 0.14);
       --radius: 22px;
+      --glow-1: rgba(157, 219, 173, 0.8);
+      --glow-2: rgba(142, 184, 151, 0.46);
+      --bg-grad-from: #c3e8bd;
+      --bg-grad-to: #8eb897;
+      --surface-soft: rgba(255, 255, 255, 0.42);
+      --surface-mid: rgba(255, 255, 255, 0.55);
+      --surface-strong: rgba(255, 255, 255, 0.7);
+      --surface-border: rgba(255, 255, 255, 0.64);
+      --hover-border: rgba(91, 117, 83, 0.55);
+      --hover-bg: rgba(157, 219, 173, 0.5);
+      --note-ink: #040403;
     }}
     @media (prefers-color-scheme: dark) {{
       :root {{
-        --bg: #1b1712;
-        --panel: rgba(38, 33, 27, 0.94);
-        --ink: #f1ece2;
-        --muted: #a89c8d;
-        --line: rgba(244, 239, 229, 0.12);
-        --accent: #2bb39e;
-        --accent-soft: rgba(43, 179, 158, 0.16);
-        --shadow: 0 20px 45px rgba(0, 0, 0, 0.4);
+        --bg: #040403;
+        --panel: rgba(18, 27, 17, 0.88);
+        --ink: #c3e8bd;
+        --muted: #9ddbad;
+        --line: rgba(195, 232, 189, 0.2);
+        --accent: #8eb897;
+        --accent-soft: rgba(91, 117, 83, 0.5);
+        --shadow: 0 20px 45px rgba(0, 0, 0, 0.55);
+        --glow-1: rgba(91, 117, 83, 0.34);
+        --glow-2: rgba(142, 184, 151, 0.12);
+        --bg-grad-from: #101510;
+        --bg-grad-to: #040403;
+        --surface-soft: rgba(195, 232, 189, 0.07);
+        --surface-mid: rgba(195, 232, 189, 0.11);
+        --surface-strong: rgba(195, 232, 189, 0.16);
+        --surface-border: rgba(195, 232, 189, 0.16);
+        --hover-border: rgba(157, 219, 173, 0.56);
+        --hover-bg: rgba(91, 117, 83, 0.38);
+        --note-ink: #c3e8bd;
       }}
     }}
     * {{ box-sizing: border-box; }}
@@ -245,9 +311,9 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
       margin: 0;
       color: var(--ink);
       background:
-        radial-gradient(circle at top left, rgba(13, 107, 93, 0.18), transparent 34%),
-        radial-gradient(circle at top right, rgba(194, 108, 62, 0.16), transparent 28%),
-        linear-gradient(180deg, #f7f2e8 0%, #f1e8d8 100%);
+        radial-gradient(circle at top left, var(--glow-1), transparent 34%),
+        radial-gradient(circle at top right, var(--glow-2), transparent 28%),
+        linear-gradient(180deg, var(--bg-grad-from) 0%, var(--bg-grad-to) 100%);
       font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
     }}
     .shell {{
@@ -271,6 +337,39 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
       margin: 4px 0 0;
       color: var(--muted);
     }}
+    .sync-status {{
+      display: inline-flex;
+      margin: 10px 0 0;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-soft);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }}
+    .sync-metrics {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(76px, 1fr));
+      gap: 8px;
+      margin: 10px 0 0;
+    }}
+    .sync-metrics div {{
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-soft);
+    }}
+    .sync-metrics dt {{
+      color: var(--muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }}
+    .sync-metrics dd {{
+      margin: 3px 0 0;
+      font-size: 1.08rem;
+      font-weight: bold;
+    }}
     .actions {{
       display: flex;
       gap: 10px;
@@ -279,6 +378,39 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
     }}
     .sync-form, .filter-form {{
       display: contents;
+    }}
+    .sync-button-busy, .sync-progress {{
+      display: none;
+    }}
+    .sync-form.is-syncing .sync-button-idle {{
+      display: none;
+    }}
+    .sync-form.is-syncing .sync-button-busy {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }}
+    .sync-form.is-syncing .sync-progress {{
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }}
+    .sync-spinner {{
+      width: 0.9rem;
+      height: 0.9rem;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: sync-spin 0.8s linear infinite;
+    }}
+    @keyframes sync-spin {{
+      to {{ transform: rotate(360deg); }}
+    }}
+    button:disabled {{
+      cursor: wait;
+      opacity: 0.78;
     }}
     button, .button-link {{
       border: 0;
@@ -293,7 +425,7 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
     }}
     .button-link.secondary, button.secondary {{
       color: var(--ink);
-      background: rgba(255, 255, 255, 0.75);
+      background: var(--surface-strong);
     }}
     .flash {{
       margin-bottom: 14px;
@@ -314,7 +446,7 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
       padding: 14px 16px;
       border-radius: 999px;
       border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.82);
+      background: var(--surface-strong);
       font: inherit;
     }}
     .check {{
@@ -331,7 +463,7 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
     }}
     .panel {{
       background: var(--panel);
-      border: 1px solid rgba(255, 255, 255, 0.55);
+      border: 1px solid var(--surface-border);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
       backdrop-filter: blur(12px);
@@ -379,11 +511,11 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
       border-radius: 18px;
       padding: 14px;
       margin-bottom: 10px;
-      background: rgba(255, 255, 255, 0.52);
+      background: var(--surface-soft);
     }}
     .result-card:hover, .result-card.selected {{
-      border-color: rgba(13, 107, 93, 0.2);
-      background: rgba(13, 107, 93, 0.08);
+      border-color: var(--hover-border);
+      background: var(--hover-bg);
     }}
     .result-title {{
       font-size: 1.05rem;
@@ -398,7 +530,7 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
       flex-wrap: wrap;
     }}
     .result-note {{
-      color: #564a3c;
+      color: var(--note-ink);
       font-size: 0.95rem;
       line-height: 1.4;
     }}
@@ -445,7 +577,7 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
     .detail-notes, .detail-json {{
       white-space: pre-wrap;
       word-break: break-word;
-      background: rgba(255, 255, 255, 0.68);
+      background: var(--surface-mid);
       border: 1px solid var(--line);
       border-radius: 18px;
       padding: 14px;
@@ -457,6 +589,12 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
       color: var(--muted);
       padding: 18px 0;
     }}
+    .app-version {{
+      margin: 18px 4px 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+      text-align: right;
+    }}
     @media (max-width: 1100px) {{
       .layout {{
         grid-template-columns: 1fr;
@@ -467,6 +605,9 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
       .controls {{
         grid-template-columns: 1fr;
       }}
+      .sync-metrics {{
+        grid-template-columns: repeat(2, minmax(110px, 1fr));
+      }}
     }}
   </style>
 </head>
@@ -476,16 +617,24 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
       <div class="brand">
         <h1>Watch List Browser</h1>
         <p>Browse your local tdmedia catalog without leaving the machine.</p>
+        <div class="sync-status">{html.escape(sync_status)}</div>
+        {sync_metrics_html}
       </div>
       <div class="actions">
-        <form class="sync-form" method="post" action="/sync">
+        <form class="sync-form" method="post" action="/sync" id="sync-form">
           <input type="hidden" name="q" value="{html.escape(search, quote=True)}">
           <input type="hidden" name="service" value="{html.escape(service, quote=True)}">
           <input type="hidden" name="id" value="{html.escape(str(selected_id or ''), quote=True)}">
           <input type="hidden" name="completed" value="{1 if include_completed else 0}">
           <input type="hidden" name="uncategorized" value="{1 if uncategorized_only else 0}">
           <input type="hidden" name="notes" value="{1 if has_notes else 0}">
-          <button type="submit">Sync Now</button>
+          <button type="submit" id="sync-button">
+            <span class="sync-button-idle">Sync Now</span>
+            <span class="sync-button-busy"><span class="sync-spinner" aria-hidden="true"></span>Syncing...</span>
+          </button>
+          <span class="sync-progress" role="status" aria-live="polite">
+            <span class="sync-spinner" aria-hidden="true"></span>Updating from Toodledo...
+          </span>
         </form>
         <a class="button-link secondary" href="/export?format=json">Export JSON</a>
         <a class="button-link secondary" href="/export?format=csv">Export CSV</a>
@@ -529,7 +678,26 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
         </div>
       </section>
     </div>
+    <footer class="app-version">tdmedia v{html.escape(__version__)}</footer>
   </div>
+  <script>
+    const syncForm = document.getElementById("sync-form");
+    const syncButton = document.getElementById("sync-button");
+    if (syncForm && syncButton) {{
+      syncForm.addEventListener("submit", () => {{
+        syncForm.classList.add("is-syncing");
+        syncButton.disabled = true;
+        syncButton.setAttribute("aria-busy", "true");
+      }});
+    }}
+
+    if (document.querySelector(".flash")) {{
+      const url = new URL(window.location.href);
+      url.searchParams.delete("message");
+      url.searchParams.delete("message_type");
+      window.history.replaceState({{}}, "", url);
+    }}
+  </script>
 </body>
 </html>
 """
@@ -603,10 +771,13 @@ def serve_browser(
             try:
                 result = sync_watchlist(db_path)
                 message = (
-                    f"Synced {result['imported']} item(s) from {result['folder']}."
+                    f"Synced {result['imported']} item(s) from {result['folder']}: "
+                    f"{result['added']} added, {result['deleted']} deleted."
                 )
+                message_type = "success"
             except Exception as exc:  # noqa: BLE001
-                message = f"Sync failed: {exc}"
+                message = f"Sync failed: {auth.redact_sensitive_text(exc)}"
+                message_type = "error"
             qs = _build_query_string(
                 search=_first_param(params, "q"),
                 service=_first_param(params, "service"),
@@ -617,6 +788,7 @@ def serve_browser(
                 uncategorized_only=_bool_param(params, "uncategorized"),
                 has_notes=_bool_param(params, "notes"),
                 message=message,
+                message_type=message_type,
             )
             target = "/"
             if qs:

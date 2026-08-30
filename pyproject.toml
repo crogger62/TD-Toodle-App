@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "toodledo-cli"
-version = "1.0"
+dynamic = ["version"]
 description = "Toodledo CLI (MVP)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -19,3 +19,6 @@ tdmedia = "tdmedia.cli:main"
 
 [tool.setuptools.packages]
 find = {}
+
+[tool.setuptools.dynamic]
+version = {attr = "td.__version__"}

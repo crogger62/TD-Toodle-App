@@ -14,6 +14,9 @@ python -m pip install -e .
 ```
 
 This installs the package itself and creates the `td` and `tdmedia` console commands.
+Both commands share the same release version, available through `td --version`
+and `tdmedia --version`. The tdmedia browser also shows its version in the page
+footer.
 
 If you only want the runtime dependency without installing the package, `requirements.txt` still contains:
 
@@ -440,6 +443,7 @@ plan and next milestones.
 The local Watch List workflow is working end to end in this repository:
 
 - `tdmedia sync` imports from Toodledo into `~/.config/toodledo-cli/watchlist.sqlite`
+- each sync writes a completion or redacted failure entry to stdout/stderr (the system journal when run as a service); successful syncs include fetched, added, deleted, and net item counts, which the browser also displays beneath its sync timestamp
 - `tdmedia services`, `list`, `search`, `show`, and `export` work against the local SQLite catalog
 - `tdmedia serve` launches a local browser UI, complete with a tab/pinned-tab favicon
 - service normalization now lowercases service names, preserves `raw_tags`, fixes a few obvious typos, and drops noisy non-service tags to `None`
@@ -455,6 +459,62 @@ You can also run it locally on the machine itself:
 ```text
 http://127.0.0.1:8766
 ```
+
+### Run The Browser As A Service
+
+On Linux, run the browser under a system `systemd` service when it should stay
+available after logout or reboot. The service starts `tdmedia sync` before the
+browser, then serves the catalog on port `8766`. A failed sync does not prevent
+the browser from starting, so the last locally imported catalog remains
+available. `systemd` restarts the browser if it exits unexpectedly.
+
+Before installing the service, complete `td login` as the same Linux user that
+will run the service. The OAuth tokens and the local SQLite catalog are stored
+in that user's configuration directory.
+
+Create `/etc/systemd/system/tdmedia-watchlist.service` with the following
+content, updating `User` and `WorkingDirectory` if needed:
+
+```ini
+[Unit]
+Description=TDMedia WatchList Browser
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=crog
+WorkingDirectory=/home/crog/Projects/TD-Toodle-App
+ExecStartPre=-/home/crog/Projects/TD-Toodle-App/.venv/bin/tdmedia sync
+ExecStart=/home/crog/Projects/TD-Toodle-App/.venv/bin/tdmedia serve --host 0.0.0.0 --port 8766
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Load the unit and start it now and on future boots:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now tdmedia-watchlist.service
+```
+
+Normal service operations:
+
+```bash
+sudo systemctl start tdmedia-watchlist.service
+sudo systemctl stop tdmedia-watchlist.service
+sudo systemctl restart tdmedia-watchlist.service
+sudo systemctl status tdmedia-watchlist.service
+sudo journalctl -u tdmedia-watchlist.service -n 100 --no-pager
+```
+
+After changing Python code, restart the service. After changing the unit file,
+run `sudo systemctl daemon-reload` before restarting. Do not also run
+`tdmedia serve` manually while the service is active, since both processes use
+port `8766`.
 
 ### Add New Movies Or Shows
 

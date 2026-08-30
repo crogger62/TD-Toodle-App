@@ -33,7 +33,7 @@ def fetch_tasks(access_token: str, fields: str) -> Iterable[dict]:
             },
             timeout=30,
         )
-        response.raise_for_status()
+        auth.raise_for_status(response)
         payload = response.json()
         auth._raise_if_error(payload)
         if not isinstance(payload, list) or not payload:
@@ -56,9 +56,10 @@ def get_folders(access_token: str) -> List[dict]:
     )
     if response.status_code == 401:
         raise RuntimeError(
-            f"Unauthorized when fetching folders. Response: {response.text.strip()}"
+            "Unauthorized when fetching folders. Response: "
+            f"{auth.redact_sensitive_text(response.text.strip())}"
         )
-    response.raise_for_status()
+    auth.raise_for_status(response)
     payload = response.json()
     auth._raise_if_error(payload)
     if not isinstance(payload, list):
@@ -110,9 +111,10 @@ def edit_tasks(access_token: str, task_updates: List[dict], debug: bool = False)
         )
         if response.status_code == 401:
             raise RuntimeError(
-                f"Unauthorized when updating tasks. Response: {response.text.strip()}"
+                "Unauthorized when updating tasks. Response: "
+                f"{auth.redact_sensitive_text(response.text.strip())}"
             )
-        response.raise_for_status()
+        auth.raise_for_status(response)
         payload = response.json()
         if debug:
             print(f"DEBUG: edit response: {payload}")
@@ -143,9 +145,10 @@ def add_tasks(
         )
         if response.status_code == 401:
             raise RuntimeError(
-                f"Unauthorized when adding tasks. Response: {response.text.strip()}"
+                "Unauthorized when adding tasks. Response: "
+                f"{auth.redact_sensitive_text(response.text.strip())}"
             )
-        response.raise_for_status()
+        auth.raise_for_status(response)
         payload = response.json()
         auth._raise_if_error(payload)
         if not isinstance(payload, list):

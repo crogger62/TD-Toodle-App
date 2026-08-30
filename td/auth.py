@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -19,12 +20,32 @@ DEFAULT_REDIRECT_PORT = 8765
 ENV_REDIRECT_PORT = "TOODLEDO_REDIRECT_PORT"
 ENV_CONFIG_PATH = "TOODLEDO_CONFIG_PATH"
 
+_SENSITIVE_QUERY_VALUE = re.compile(
+    r"(?i)(access_token|refresh_token|client_secret)=([^&\s]+)"
+)
+_SENSITIVE_JSON_VALUE = re.compile(
+    r'(?i)("(?:access_token|refresh_token|client_secret)"\s*:\s*")[^"]*'
+)
+
 
 class OAuthResult:
     def __init__(self) -> None:
         self.code = None
         self.state = None
         self.error = None
+
+
+def redact_sensitive_text(value) -> str:
+    text = str(value)
+    text = _SENSITIVE_QUERY_VALUE.sub(r"\1=[REDACTED]", text)
+    return _SENSITIVE_JSON_VALUE.sub(r"\1[REDACTED]", text)
+
+
+def raise_for_status(response) -> None:
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        raise RuntimeError(redact_sensitive_text(exc)) from None
 
 
 class OAuthHandler(BaseHTTPRequestHandler):
@@ -109,7 +130,7 @@ def _exchange_token(
         auth=(client_id, client_secret),
         timeout=30,
     )
-    response.raise_for_status()
+    raise_for_status(response)
     payload = response.json()
     _raise_if_error(payload)
     return payload
@@ -126,7 +147,7 @@ def _refresh_token(client_id: str, client_secret: str, refresh_token: str) -> di
         auth=(client_id, client_secret),
         timeout=30,
     )
-    response.raise_for_status()
+    raise_for_status(response)
     payload = response.json()
     _raise_if_error(payload)
     return payload
@@ -135,7 +156,10 @@ def _refresh_token(client_id: str, client_secret: str, refresh_token: str) -> di
 def _raise_if_error(payload: dict) -> None:
     if "errorCode" in payload and payload.get("errorCode"):
         message = payload.get("errorDesc") or payload.get("error")
-        raise RuntimeError(f"Toodledo API error {payload.get('errorCode')}: {message}")
+        raise RuntimeError(
+            f"Toodledo API error {payload.get('errorCode')}: "
+            f"{redact_sensitive_text(message)}"
+        )
 
 
 def _run_oauth_flow(client_id: str, client_secret: str) -> dict:

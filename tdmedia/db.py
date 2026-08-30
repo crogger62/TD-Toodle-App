@@ -73,6 +73,23 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             ON watch_items(title);
         CREATE INDEX IF NOT EXISTS idx_watch_items_modified
             ON watch_items(modified);
+
+        CREATE TABLE IF NOT EXISTS sync_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS sync_runs (
+            id INTEGER PRIMARY KEY,
+            completed_at TEXT NOT NULL,
+            fetched INTEGER NOT NULL,
+            imported INTEGER NOT NULL,
+            added INTEGER NOT NULL,
+            deleted INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sync_runs_completed_at
+            ON sync_runs(completed_at DESC);
         """
     )
     conn.commit()
@@ -126,7 +143,7 @@ def row_from_task(task: dict, folder_id: int, imported_at: Optional[str] = None)
     }
 
 
-def upsert_items(conn: sqlite3.Connection, rows: Iterable[dict]) -> int:
+def _upsert_items(conn: sqlite3.Connection, rows: Iterable[dict]) -> int:
     count = 0
     for row in rows:
         conn.execute(
@@ -166,5 +183,81 @@ def upsert_items(conn: sqlite3.Connection, rows: Iterable[dict]) -> int:
             row,
         )
         count += 1
+    return count
+
+
+def upsert_items(conn: sqlite3.Connection, rows: Iterable[dict]) -> int:
+    count = _upsert_items(conn, rows)
     conn.commit()
     return count
+
+
+def replace_folder_items(
+    conn: sqlite3.Connection, rows: Iterable[dict], folder_id: int
+) -> dict:
+    rows = list(rows)
+    incoming_ids = {int(row["toodledo_id"]) for row in rows}
+    existing_ids = {
+        int(row["toodledo_id"])
+        for row in conn.execute(
+            "SELECT toodledo_id FROM watch_items WHERE folder_id = ?", (folder_id,)
+        )
+    }
+    deleted_ids = existing_ids - incoming_ids
+
+    try:
+        imported = _upsert_items(conn, rows)
+        if deleted_ids:
+            conn.executemany(
+                "DELETE FROM watch_items WHERE toodledo_id = ?",
+                [(item_id,) for item_id in deleted_ids],
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    return {
+        "imported": imported,
+        "added": len(incoming_ids - existing_ids),
+        "deleted": len(deleted_ids),
+    }
+
+
+def record_successful_sync(
+    conn: sqlite3.Connection, completed_at: str, stats: dict
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO sync_runs (completed_at, fetched, imported, added, deleted)
+        VALUES (:completed_at, :fetched, :imported, :added, :deleted)
+        """,
+        {"completed_at": completed_at, **stats},
+    )
+    conn.execute(
+        """
+        INSERT INTO sync_state (key, value)
+        VALUES ('last_successful_sync_at', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (completed_at,),
+    )
+    conn.commit()
+
+
+def last_successful_sync(conn: sqlite3.Connection) -> Optional[str]:
+    row = conn.execute(
+        "SELECT value FROM sync_state WHERE key = 'last_successful_sync_at'"
+    ).fetchone()
+    return str(row["value"]) if row is not None else None
+
+
+def latest_sync_run(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT completed_at, fetched, imported, added, deleted
+        FROM sync_runs
+        ORDER BY id DESC
+        LIMIT 1
+        """
+    ).fetchone()

@@ -35,7 +35,7 @@ def _fetch_account(access_token: str) -> dict:
         params={"access_token": access_token},
         timeout=30,
     )
-    response.raise_for_status()
+    auth.raise_for_status(response)
     payload = response.json()
     auth._raise_if_error(payload)
     return payload
@@ -619,6 +619,7 @@ def cmd_complete(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="td")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     login_parser = subparsers.add_parser("login", help="Authenticate with Toodledo")

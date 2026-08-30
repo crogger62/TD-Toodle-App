@@ -35,7 +35,6 @@ def cmd_sync(args: argparse.Namespace) -> int:
     try:
         result = sync_watchlist(args.db)
     except Exception as exc:  # noqa: BLE001
-        print(f"sync failed: {exc}", file=sys.stderr)
         return 1
     print(
         f"Imported {result['imported']} {result['folder']} item(s) "

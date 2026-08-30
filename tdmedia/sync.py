@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+import sys
 from typing import Iterable, Optional
 
 from td import auth
@@ -37,6 +39,17 @@ def _fetch_watchlist_tasks(access_token: str, folder_id: int) -> Iterable[dict]:
 
 
 def sync_watchlist(db_path: Optional[str] = None) -> dict:
+    try:
+        return _sync_watchlist(db_path)
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"tdmedia sync failed: {auth.redact_sensitive_text(exc)}",
+            file=sys.stderr,
+        )
+        raise
+
+
+def _sync_watchlist(db_path: Optional[str] = None) -> dict:
     tokens = auth.ensure_tokens()
     access_token = tokens["access_token"]
     try:
@@ -51,12 +64,26 @@ def sync_watchlist(db_path: Optional[str] = None) -> dict:
         fetched = list(_fetch_watchlist_tasks(access_token, folder_id))
 
     rows = [db.row_from_task(task, folder_id) for task in fetched]
+    completed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     with db.connect(db_path) as conn:
-        imported = db.upsert_items(conn, rows)
-    return {
+        stats = db.replace_folder_items(conn, rows, folder_id)
+        db.record_successful_sync(
+            conn,
+            completed_at,
+            {"fetched": len(fetched), **stats},
+        )
+    result = {
         "folder": "Watch List",
         "folder_id": folder_id,
         "fetched": len(fetched),
-        "imported": imported,
+        **stats,
+        "completed_at": completed_at,
         "db_path": db_path or db.default_db_path(),
     }
+    print(
+        "tdmedia sync complete: "
+        f"fetched={result['fetched']} imported={result['imported']} "
+        f"added={result['added']} deleted={result['deleted']} "
+        f"net={result['added'] - result['deleted']}"
+    )
+    return result

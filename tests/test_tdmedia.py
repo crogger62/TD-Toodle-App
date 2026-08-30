@@ -1,11 +1,14 @@
 import sqlite3
 import unittest
-from contextlib import nullcontext
+from contextlib import nullcontext, redirect_stderr
+from datetime import datetime
+from io import StringIO
 from unittest.mock import patch
 
 from tdmedia import db
 from tdmedia import query
 from tdmedia import sync
+from tdmedia import web
 
 
 class DbTests(unittest.TestCase):
@@ -62,6 +65,53 @@ class DbTests(unittest.TestCase):
         self.assertEqual(row["title"], "New")
         self.assertEqual(row["service"], "hulu")
         self.assertEqual(row["imported_at"], "second")
+
+    def test_records_and_reads_last_successful_sync(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        db.ensure_schema(conn)
+
+        db.record_successful_sync(
+            conn,
+            "2026-08-28T18:30:00+00:00",
+            {"fetched": 4, "imported": 4, "added": 2, "deleted": 1},
+        )
+
+        self.assertEqual(
+            db.last_successful_sync(conn), "2026-08-28T18:30:00+00:00"
+        )
+        sync_run = db.latest_sync_run(conn)
+        self.assertEqual(dict(sync_run), {
+            "completed_at": "2026-08-28T18:30:00+00:00",
+            "fetched": 4,
+            "imported": 4,
+            "added": 2,
+            "deleted": 1,
+        })
+
+    def test_replace_folder_items_counts_additions_and_deletions(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        db.ensure_schema(conn)
+        db.upsert_items(
+            conn,
+            [
+                db.row_from_task({"id": 1, "title": "Removed"}, 10, "now"),
+                db.row_from_task({"id": 2, "title": "Other folder"}, 11, "now"),
+            ],
+        )
+
+        stats = db.replace_folder_items(
+            conn,
+            [db.row_from_task({"id": 3, "title": "Added"}, 10, "now")],
+            folder_id=10,
+        )
+
+        self.assertEqual(stats, {"imported": 1, "added": 1, "deleted": 1})
+        rows = conn.execute(
+            "SELECT toodledo_id FROM watch_items ORDER BY toodledo_id"
+        ).fetchall()
+        self.assertEqual([row["toodledo_id"] for row in rows], [2, 3])
 
 
 class QueryTests(unittest.TestCase):
@@ -150,6 +200,23 @@ class QueryTests(unittest.TestCase):
 
 
 class SyncTests(unittest.TestCase):
+    @patch("tdmedia.sync.auth.ensure_tokens")
+    def test_sync_failure_is_logged_with_redacted_credentials(
+        self, mock_ensure_tokens
+    ) -> None:
+        mock_ensure_tokens.side_effect = RuntimeError(
+            "429 for url: https://example.test?access_token=secret"
+        )
+        stderr = StringIO()
+
+        with redirect_stderr(stderr), self.assertRaises(RuntimeError):
+            sync.sync_watchlist(":memory:")
+
+        output = stderr.getvalue()
+        self.assertIn("tdmedia sync failed:", output)
+        self.assertIn("access_token=[REDACTED]", output)
+        self.assertNotIn("secret", output)
+
     @patch("tdmedia.sync.db.connect")
     @patch("tdmedia.sync.tasks.fetch_tasks")
     @patch("tdmedia.sync.tasks.resolve_folder_value")
@@ -176,8 +243,61 @@ class SyncTests(unittest.TestCase):
 
         self.assertEqual(result["fetched"], 1)
         self.assertEqual(result["imported"], 1)
+        self.assertEqual(result["added"], 1)
+        self.assertEqual(result["deleted"], 0)
+        self.assertEqual(db.last_successful_sync(conn), result["completed_at"])
         row = conn.execute("SELECT title, service FROM watch_items").fetchone()
         self.assertEqual((row["title"], row["service"]), ("Keep", "netflix"))
+
+
+class WebTests(unittest.TestCase):
+    def test_page_shows_last_successful_sync(self) -> None:
+        with patch("tdmedia.web.db.connect") as mock_connect:
+            conn = sqlite3.connect(":memory:")
+            conn.row_factory = sqlite3.Row
+            db.ensure_schema(conn)
+            db.record_successful_sync(
+                conn,
+                "2026-08-28T18:30:00+00:00",
+                {"fetched": 12, "imported": 12, "added": 3, "deleted": 1},
+            )
+            mock_connect.return_value = nullcontext(conn)
+
+            page = web._render_page(":memory:", {})
+            stale_error_page = web._render_page(
+                ":memory:", {"message": ["Sync failed: old rate limit"]}
+            )
+            current_error_page = web._render_page(
+                ":memory:",
+                {
+                    "message": ["Sync failed: current rate limit"],
+                    "message_type": ["error"],
+                },
+            )
+
+        local_timestamp = datetime.fromisoformat(
+            "2026-08-28T18:30:00+00:00"
+        ).astimezone()
+        expected_sync_status = (
+            f"Last successful sync: {local_timestamp.strftime('%b')} "
+            f"{local_timestamp.day}, {local_timestamp.year} at "
+            f"{local_timestamp.strftime('%I:%M %p').lstrip('0')} "
+            f"{local_timestamp.tzname()}."
+        )
+        self.assertIn(expected_sync_status, page)
+        self.assertIn('aria-label="Last sync metrics"', page)
+        self.assertIn("Fetched</dt><dd>12", page)
+        self.assertIn("Added</dt><dd>3", page)
+        self.assertIn("Deleted</dt><dd>1", page)
+        self.assertIn("Net change</dt><dd>+2", page)
+        self.assertIn('id="sync-form"', page)
+        self.assertIn("Updating from Toodledo...", page)
+        self.assertIn('syncForm.classList.add("is-syncing")', page)
+        self.assertIn('url.searchParams.delete("message")', page)
+        self.assertNotIn("Sync failed: old rate limit", stale_error_page)
+        self.assertIn("Sync failed: current rate limit", current_error_page)
+        self.assertIn("#5b7553", page)
+        self.assertIn("tdmedia v1.1.0", page)
 
 
 if __name__ == "__main__":
