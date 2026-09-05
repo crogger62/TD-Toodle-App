@@ -192,6 +192,20 @@ def upsert_items(conn: sqlite3.Connection, rows: Iterable[dict]) -> int:
     return count
 
 
+def mark_item_completed(conn: sqlite3.Connection, toodledo_id: int) -> bool:
+    """Hide an item from active listings after Toodledo confirms completion."""
+    cursor = conn.execute(
+        """
+        UPDATE watch_items
+        SET completed = 1
+        WHERE toodledo_id = ? AND completed = 0
+        """,
+        (toodledo_id,),
+    )
+    conn.commit()
+    return cursor.rowcount == 1
+
+
 def replace_folder_items(
     conn: sqlite3.Connection, rows: Iterable[dict], folder_id: int
 ) -> dict:

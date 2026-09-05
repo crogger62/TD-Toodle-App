@@ -1,5 +1,6 @@
 import html
 import json
+import secrets
 import socket
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -12,11 +13,12 @@ from td import auth
 from . import __version__
 from . import db
 from . import query as query_module
-from .sync import sync_watchlist
+from .sync import complete_watch_item, sync_watchlist
 
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8766
+CSRF_TOKEN = secrets.token_urlsafe(32)
 
 
 def _bool_param(params: dict, name: str) -> bool:
@@ -162,11 +164,12 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
         note_preview = note[:137].rstrip() + "..." if len(note) > 140 else note
         list_items.append(
             f"""
-            <a class="{selected_class}" href="/?{html.escape(href_qs, quote=True)}">
+            <a class="{selected_class}" data-toodledo-id="{row_id}" href="/?{html.escape(href_qs, quote=True)}">
               <div class="result-title">{html.escape(row['title'])}</div>
               <div class="result-meta">
                 <span>{html.escape(row_service)}</span>
                 <span>#{row_id}</span>
+                <span class="result-pending-label">Completion preview</span>
               </div>
               <div class="result-note">{html.escape(note_preview or "No notes")}</div>
             </a>
@@ -205,6 +208,36 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
     detail_html = '<div class="empty-state">No item selected.</div>'
     if selected_row is not None:
         payload = {key: selected_row[key] for key in selected_row.keys()}
+        completion_action_html = ""
+        if not selected_row["completed"]:
+            completion_action_html = f"""
+            <form class="completion-action" data-toodledo-id="{selected_row['toodledo_id']}" method="post" action="/complete" id="complete-form">
+              <input type="hidden" name="csrf_token" value="{CSRF_TOKEN}">
+              <input type="hidden" name="toodledo_id" value="{selected_row['toodledo_id']}">
+              <input type="hidden" name="q" value="{html.escape(search, quote=True)}">
+              <input type="hidden" name="service" value="{html.escape(service, quote=True)}">
+              <input type="hidden" name="completed" value="{1 if include_completed else 0}">
+              <input type="hidden" name="uncategorized" value="{1 if uncategorized_only else 0}">
+              <input type="hidden" name="notes" value="{1 if has_notes else 0}">
+              <button class="complete-trigger" type="button" id="complete-trigger" aria-controls="complete-confirmation" aria-expanded="false">
+                No longer needed
+              </button>
+              <div class="complete-confirmation" id="complete-confirmation" hidden>
+                <p>Mark this task complete in Toodledo?</p>
+                <p class="completion-preview-note">This item will disappear from the active listing after completion.</p>
+                <div class="completion-actions">
+                  <button class="secondary" type="button" id="complete-cancel">Cancel</button>
+                  <button type="submit" id="complete-submit">
+                    <span class="complete-submit-idle">Complete in Toodledo</span>
+                    <span class="complete-submit-busy"><span class="sync-spinner" aria-hidden="true"></span>Completing...</span>
+                  </button>
+                </div>
+                <span class="completion-progress" role="status" aria-live="polite">
+                  <span class="sync-spinner" aria-hidden="true"></span>Updating Toodledo...
+                </span>
+              </div>
+            </form>
+            """
         detail_html = f"""
         <div class="detail-header">
           <h2>{html.escape(selected_row['title'])}</h2>
@@ -224,6 +257,7 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
           <dt>Folder ID</dt>
           <dd>{html.escape(str(selected_row['folder_id']))}</dd>
         </dl>
+        {completion_action_html}
         <h3>Notes</h3>
         <pre class="detail-notes">{html.escape(selected_row['notes'] or '')}</pre>
         <h3>JSON</h3>
@@ -517,6 +551,10 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
       border-color: var(--hover-border);
       background: var(--hover-bg);
     }}
+    .result-card.is-completion-preview {{
+      opacity: 0.58;
+      border-style: dashed;
+    }}
     .result-title {{
       font-size: 1.05rem;
       margin-bottom: 8px;
@@ -528,6 +566,14 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
       font-size: 0.92rem;
       margin-bottom: 8px;
       flex-wrap: wrap;
+    }}
+    .result-pending-label {{
+      display: none;
+      color: var(--accent);
+      font-weight: bold;
+    }}
+    .result-card.is-completion-preview .result-pending-label {{
+      display: inline;
     }}
     .result-note {{
       color: var(--note-ink);
@@ -569,6 +615,53 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
     .detail-grid dd {{
       margin: 0;
       word-break: break-word;
+    }}
+    .completion-action {{
+      margin: 0 0 20px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface-soft);
+    }}
+    .complete-trigger {{
+      width: 100%;
+    }}
+    .complete-confirmation {{
+      margin-top: 12px;
+    }}
+    .complete-confirmation p {{
+      margin: 0;
+    }}
+    .completion-note {{
+      margin-top: 5px !important;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }}
+    .completion-preview-note {{
+      margin-top: 9px !important;
+      font-size: 0.9rem;
+    }}
+    .completion-actions {{
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }}
+    .complete-submit-busy, .completion-progress {{
+      display: none;
+    }}
+    .completion-action.is-completing .complete-submit-idle {{
+      display: none;
+    }}
+    .completion-action.is-completing .complete-submit-busy, .completion-action.is-completing .completion-progress {{
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }}
+    .completion-progress {{
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 0.9rem;
     }}
     .detail h3 {{
       margin: 20px 0 8px;
@@ -622,6 +715,7 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
       </div>
       <div class="actions">
         <form class="sync-form" method="post" action="/sync" id="sync-form">
+          <input type="hidden" name="csrf_token" value="{CSRF_TOKEN}">
           <input type="hidden" name="q" value="{html.escape(search, quote=True)}">
           <input type="hidden" name="service" value="{html.escape(service, quote=True)}">
           <input type="hidden" name="id" value="{html.escape(str(selected_id or ''), quote=True)}">
@@ -688,6 +782,35 @@ def _render_page(db_path: Optional[str], params: dict) -> str:
         syncForm.classList.add("is-syncing");
         syncButton.disabled = true;
         syncButton.setAttribute("aria-busy", "true");
+      }});
+    }}
+
+    const completeTrigger = document.getElementById("complete-trigger");
+    const completeConfirmation = document.getElementById("complete-confirmation");
+    const completeCancel = document.getElementById("complete-cancel");
+    const completeForm = document.getElementById("complete-form");
+    const completeSubmit = document.getElementById("complete-submit");
+    if (completeTrigger && completeConfirmation && completeCancel && completeForm && completeSubmit) {{
+      completeTrigger.addEventListener("click", () => {{
+        completeConfirmation.hidden = false;
+        completeTrigger.setAttribute("aria-expanded", "true");
+        document
+          .querySelector(`.result-card[data-toodledo-id="${{completeTrigger.parentElement.dataset.toodledoId}}"]`)
+          ?.classList.add("is-completion-preview");
+      }});
+      completeCancel.addEventListener("click", () => {{
+        completeConfirmation.hidden = true;
+        completeTrigger.setAttribute("aria-expanded", "false");
+        document
+          .querySelector(`.result-card[data-toodledo-id="${{completeTrigger.parentElement.dataset.toodledoId}}"]`)
+          ?.classList.remove("is-completion-preview");
+        completeTrigger.focus();
+      }});
+      completeForm.addEventListener("submit", () => {{
+        completeForm.classList.add("is-completing");
+        completeTrigger.disabled = true;
+        completeSubmit.disabled = true;
+        completeSubmit.setAttribute("aria-busy", "true");
       }});
     }}
 
@@ -762,28 +885,53 @@ def serve_browser(
             self.wfile.write(payload)
 
         def do_POST(self):  # noqa: N802
-            if self.path != "/sync":
+            if self.path not in {"/sync", "/complete"}:
                 self.send_error(HTTPStatus.NOT_FOUND, "Not found")
                 return
             content_length = int(self.headers.get("Content-Length", "0"))
             raw_body = self.rfile.read(content_length).decode("utf-8")
             params = parse_qs(raw_body)
-            try:
-                result = sync_watchlist(db_path)
-                message = (
-                    f"Synced {result['imported']} item(s) from {result['folder']}: "
-                    f"{result['added']} added, {result['deleted']} deleted."
-                )
-                message_type = "success"
-            except Exception as exc:  # noqa: BLE001
-                message = f"Sync failed: {auth.redact_sensitive_text(exc)}"
-                message_type = "error"
+            if not secrets.compare_digest(_first_param(params, "csrf_token"), CSRF_TOKEN):
+                self.send_error(HTTPStatus.FORBIDDEN, "Invalid form token. Refresh and try again.")
+                return
+
+            selected_id = (
+                int(_first_param(params, "id"))
+                if _first_param(params, "id").isdigit()
+                else None
+            )
+            if self.path == "/complete":
+                raw_toodledo_id = _first_param(params, "toodledo_id")
+                if not raw_toodledo_id.isdigit() or int(raw_toodledo_id) <= 0:
+                    message = "Completion failed: invalid Watch List item."
+                    message_type = "error"
+                else:
+                    toodledo_id = int(raw_toodledo_id)
+                    try:
+                        result = complete_watch_item(toodledo_id, db_path)
+                        message = f"Marked {result['title']} complete in Toodledo."
+                        message_type = "success"
+                        selected_id = None
+                    except Exception as exc:  # noqa: BLE001
+                        message = (
+                            f"Completion failed: {auth.redact_sensitive_text(exc)}"
+                        )
+                        message_type = "error"
+            else:
+                try:
+                    result = sync_watchlist(db_path)
+                    message = (
+                        f"Synced {result['imported']} item(s) from {result['folder']}: "
+                        f"{result['added']} added, {result['deleted']} deleted."
+                    )
+                    message_type = "success"
+                except Exception as exc:  # noqa: BLE001
+                    message = f"Sync failed: {auth.redact_sensitive_text(exc)}"
+                    message_type = "error"
             qs = _build_query_string(
                 search=_first_param(params, "q"),
                 service=_first_param(params, "service"),
-                selected_id=int(_first_param(params, "id"))
-                if _first_param(params, "id").isdigit()
-                else None,
+                selected_id=selected_id,
                 include_completed=_bool_param(params, "completed"),
                 uncategorized_only=_bool_param(params, "uncategorized"),
                 has_notes=_bool_param(params, "notes"),

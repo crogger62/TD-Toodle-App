@@ -49,6 +49,65 @@ def sync_watchlist(db_path: Optional[str] = None) -> dict:
         raise
 
 
+def complete_watch_item(toodledo_id: int, db_path: Optional[str] = None) -> dict:
+    """Complete one active Watch List task remotely, then update the local copy."""
+    try:
+        with db.connect(db_path) as conn:
+            item = conn.execute(
+                """
+                SELECT toodledo_id, title
+                FROM watch_items
+                WHERE toodledo_id = ? AND completed = 0
+                """,
+                (toodledo_id,),
+            ).fetchone()
+        if item is None:
+            raise ValueError("This active Watch List item is no longer available.")
+
+        tokens = auth.ensure_tokens()
+        scope = tokens.get("scope")
+        if scope and "write" not in scope.split():
+            raise RuntimeError(
+                f"Access token lacks write scope (scope='{scope}'). Re-run login."
+            )
+
+        completed_at = int(datetime.now(timezone.utc).timestamp())
+        update = [{"id": toodledo_id, "completed": completed_at}]
+        try:
+            results = tasks.edit_tasks(tokens["access_token"], update)
+        except Exception as exc:  # noqa: BLE001
+            if not _is_auth_error(exc):
+                raise
+            tokens = auth.refresh_on_failure(tokens, exc)
+            results = tasks.edit_tasks(tokens["access_token"], update)
+
+        errors = [result for result in results if result.get("errorCode")]
+        if errors:
+            error = errors[0]
+            raise RuntimeError(
+                "Toodledo completion failed: "
+                f"{error.get('errorCode')}: {error.get('errorDesc', 'Unknown error')}"
+            )
+        if not any(int(result.get("id") or 0) == toodledo_id for result in results):
+            raise RuntimeError("Toodledo did not confirm task completion.")
+
+        with db.connect(db_path) as conn:
+            if not db.mark_item_completed(conn, toodledo_id):
+                raise RuntimeError(
+                    "Toodledo completed the task, but the local item was already removed."
+                )
+
+        result = {"toodledo_id": toodledo_id, "title": str(item["title"])}
+        print(f"tdmedia completion complete: toodledo_id={toodledo_id}")
+        return result
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"tdmedia completion failed: {auth.redact_sensitive_text(exc)}",
+            file=sys.stderr,
+        )
+        raise
+
+
 def _sync_watchlist(db_path: Optional[str] = None) -> dict:
     tokens = auth.ensure_tokens()
     access_token = tokens["access_token"]
