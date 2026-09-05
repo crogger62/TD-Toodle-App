@@ -463,10 +463,10 @@ http://127.0.0.1:8766
 ### Run The Browser As A Service
 
 On Linux, run the browser under a system `systemd` service when it should stay
-available after logout or reboot. The service starts `tdmedia sync` before the
-browser, then serves the catalog on port `8766`. A failed sync does not prevent
-the browser from starting, so the last locally imported catalog remains
-available. `systemd` restarts the browser if it exits unexpectedly.
+available after logout or reboot. The service serves the existing local catalog
+on port `8766` and restarts the browser if it exits unexpectedly. Starting or
+restarting the service does not contact Toodledo. Sync from the browser's
+**Sync Now** button, or run `tdmedia sync` explicitly from a terminal.
 
 Before installing the service, complete `td login` as the same Linux user that
 will run the service. The OAuth tokens and the local SQLite catalog are stored
@@ -485,7 +485,6 @@ Wants=network-online.target
 Type=simple
 User=crog
 WorkingDirectory=/home/crog/Projects/TD-Toodle-App
-ExecStartPre=-/home/crog/Projects/TD-Toodle-App/.venv/bin/tdmedia sync
 ExecStart=/home/crog/Projects/TD-Toodle-App/.venv/bin/tdmedia serve --host 0.0.0.0 --port 8766
 Restart=on-failure
 RestartSec=5
